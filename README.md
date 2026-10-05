@@ -1,8 +1,8 @@
-# Local Delivery — Stage 2
+# Local Delivery — Stage 3
 
 A local peer-to-peer delivery project for Oslo, built in small, tested stages.
 
-Stages 1 and 2 are complete. The project has a FastAPI backend, a Next.js setup page, PostgreSQL, SQLAlchemy models, Alembic migrations, and two demo users. Stage 3 (the create-request API) has not started. Swagger still exposes only `GET /health`.
+Stages 1–3 are complete. The project has a FastAPI backend, a Next.js setup page, PostgreSQL, SQLAlchemy models, Alembic migrations, two demo users, and a validated `POST /requests` endpoint. Stage 4 has not started; listing and retrieving requests through the API come later.
 
 ## Requirements
 
@@ -33,11 +33,15 @@ local-delivery/
 │   │   ├── seed.py
 │   │   ├── api/
 │   │   │   ├── __init__.py
-│   │   │   └── health.py
-│   │   └── models/
+│   │   │   ├── health.py
+│   │   │   └── requests.py
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── enums.py
+│   │   │   ├── user.py
+│   │   │   └── delivery_request.py
+│   │   └── schemas/
 │   │       ├── __init__.py
-│   │       ├── enums.py
-│   │       ├── user.py
 │   │       └── delivery_request.py
 │   ├── migrations/
 │   │   ├── env.py
@@ -46,6 +50,7 @@ local-delivery/
 │   └── tests/
 │       ├── conftest.py
 │       ├── test_config.py
+│       ├── test_create_request.py
 │       ├── test_health.py
 │       ├── test_migrations.py
 │       ├── test_models.py
@@ -60,9 +65,11 @@ local-delivery/
     └── tsconfig.json
 ```
 
-The containing `LD` workspace already has a Git repository. `.env`, `.venv`, `node_modules`, `.next`, and generated Python/TypeScript caches are ignored. Frontend source is unchanged in Stage 2.
+`local-delivery` is the project Git repository. `.env`, `.venv`, `node_modules`, `.next`, and generated Python/TypeScript caches are ignored. Frontend source is unchanged since Stage 1.
 
 Stage 2 added `compose.yaml`, backend configuration/session helpers, four model files, the seed command, Alembic configuration and three migration files, and five database/configuration test files. It updated `.env.example`, `requirements.txt`, this README, and the health endpoint's docstring. A local ignored `.env` was created with a generated password; no password is stored in source control.
+
+Stage 3 added `backend/app/api/requests.py`, `backend/app/schemas/__init__.py`, `backend/app/schemas/delivery_request.py`, and `backend/tests/test_create_request.py`. It updated `backend/app/main.py`, `backend/app/database.py` (docstring), `backend/tests/conftest.py`, `backend/requirements.txt` (direct Pydantic dependency), and this README. No database migration was needed.
 
 ## Quick start on this machine
 
@@ -138,6 +145,48 @@ The Docker volume persists across container restarts. Changing a password in `.e
 
 Alembic owns schema creation; the application does not call `create_all` at startup. Migration `0001` creates both tables, enum types, constraints, and indexes. Its downgrade removes them; rollback is tested only in disposable test schemas.
 
+## Create a delivery request (Stage 3)
+
+`POST /requests` validates the body, checks that the customer exists, saves the request in one database transaction, and returns the complete record with HTTP **201 Created**. The database assigns the ID, timestamps, and default `OPEN` status. The helper starts as `null`.
+
+Validation rules:
+
+- All fields below are required except `shopping_budget`, which can be omitted or `null` for any category.
+- `customer_id` must be a positive integer referring to an existing user.
+- Category must be `PACKAGE`, `BUY`, or `PICKUP`.
+- Title, description, and addresses must contain non-whitespace text. Surrounding whitespace is trimmed; title length is limited to 200 characters and addresses to 500.
+- Amounts must be finite, nonnegative, at most 99,999,999.99 NOK, and have no more than two decimal places. Zero reward is permitted. Response amounts are JSON strings to preserve decimal precision.
+- The deadline must be in the future. Include an explicit timezone offset when possible. A datetime without one is interpreted in `Europe/Oslo`; responses use UTC.
+- Extra fields are rejected, including client-supplied `id`, `status`, or `helper_id`.
+
+To test in Swagger:
+
+1. Start PostgreSQL and the backend using the quick-start commands.
+2. Open <http://localhost:8000/docs#/requests/create_request_requests_post>.
+3. Expand **POST /requests**, click **Try it out**, and paste this JSON. Change the deadline to a future date if you are testing later.
+
+```json
+{
+  "customer_id": 1,
+  "category": "BUY",
+  "title": "Buy groceries",
+  "description": "Please buy milk, bread and eggs.",
+  "pickup_address": "KIWI Majorstuen, Oslo",
+  "delivery_address": "Frogner, Oslo",
+  "shopping_budget": 300,
+  "helper_reward": 80,
+  "deadline": "2026-10-06T18:00:00+02:00"
+}
+```
+
+4. Click **Execute**. Expect HTTP **201**, a new `id`, `status: "OPEN"`, `helper_id: null`, and the saved request information.
+5. Try `helper_reward: -1`, an invalid category, or remove the title. Each returns **422** with field-level details and saves no record.
+6. Try `customer_id: 999999`. Expect **404** with `Customer not found.`
+
+Database constraint conflicts return **409**. Temporary database connection failures return **503**. Failed transactions roll back, and database exception details are not included in those responses.
+
+The live Swagger verification created request **1**, titled **Stage 3 Swagger test — groceries**, in the development database. It is intentionally left available for inspection. Additional successful submissions create additional records; request creation is not an upsert.
+
 ## Run tests and checks
 
 Start PostgreSQL first, then:
@@ -150,9 +199,11 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 .venv/bin/python -m pip check
 ```
 
-Expect 28 passed tests, migration `0001 (head)`, and no schema changes detected. The health/configuration tests do not require PostgreSQL; run `pytest tests/test_health.py tests/test_config.py -q` for only those checks.
+Expect 70 passed tests, migration `0001 (head)`, and no schema changes detected. The health/configuration tests do not require PostgreSQL; run `pytest tests/test_health.py tests/test_config.py -q` for only those checks.
 
 Database tests run against actual PostgreSQL using the configured connection. Each test creates a uniquely named temporary schema, applies the real migration, commits and reads records, then removes only that schema. Tests verify all categories/status values, relationships, decimal amounts, timestamps, constraints, repeatable seeding, ID allocation, schema/model agreement, and upgrade/downgrade. They never clear the development tables and do not fall back to SQLite or skip missing database connections. Use this local development database for tests; the configured role needs permission to create schemas.
+
+Stage 3 adds 42 API tests covering successful creation in all categories, persistence from a separate database connection, required fields, invalid categories/rewards/budgets, text limits, customer IDs, deadlines, server-owned fields, optional values, unknown customers, and transaction rollback on database failures.
 
 Frontend smoke test (with `npm run dev` running):
 
@@ -181,7 +232,7 @@ SELECT id, name, email FROM users ORDER BY id;
 SELECT COUNT(*) FROM delivery_requests;
 ```
 
-Expect the `users`, `delivery_requests`, and `alembic_version` tables; revision `0001`; the two demo users above; and zero delivery requests in a fresh setup.
+Expect the `users`, `delivery_requests`, and `alembic_version` tables; revision `0001`; and the two demo users above. The request count is zero before any API submissions. The live Stage 3 Swagger test added one request on this machine. Inspect it with `SELECT id, title, status, customer_id, helper_id FROM delivery_requests ORDER BY id;`.
 
 To manually save and read a request without leaving sample data behind:
 
@@ -209,22 +260,23 @@ Verified on 2026-10-05:
 | PostgreSQL container | Healthy, bound to `127.0.0.1:5433` |
 | Alembic upgrade/current | `0001 (head)` applied |
 | Alembic schema comparison | No new upgrade operations detected |
-| Backend pytest | 28 passed |
+| Backend pytest | 70 passed |
 | Python dependency check | No broken requirements |
-| Development seed data | Exactly the two requested users; zero delivery requests |
+| Development seed data | The two requested users |
+| Live Swagger `POST /requests` | HTTP 201, request 1 saved with status OPEN |
 | Temporary test schemas after tests | Zero remaining |
 | Frontend smoke test | 1 passed |
 | Running API `/health` and `/docs` | HTTP 200 |
 
-The Stage 1 production build, lint, type checking, and browser rendering also passed. Frontend code was not changed in Stage 2.
+The Stage 1 production build, lint, type checking, and browser rendering also passed. Frontend code was not changed in Stages 2 or 3.
 
 ## Suggested Git commit
 
 ```text
-feat: add user and delivery request database models
+feat: add delivery request creation API
 ```
 
-Stop here. Stage 3 will add request creation and API validation when requested.
+Stop here. Stage 4 will add request listing and retrieval when requested.
 
 ## References
 

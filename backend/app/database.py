@@ -19,6 +19,6 @@ def get_engine() -> Engine:
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Provide one session per future API request; callers commit explicitly."""
+    """Provide one session per API request; callers commit explicitly."""
     with Session(get_engine()) as session:
         yield session
