@@ -7,5 +7,5 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def get_health() -> dict[str, Literal["ok"]]:
-    """Report that the API is running; no database is needed in Stage 1."""
+    """Report API liveness without querying the database."""
     return {"status": "ok"}
