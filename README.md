@@ -1,8 +1,8 @@
-# Local Delivery — Stage 3
+# Local Delivery — Stage 4
 
 A local peer-to-peer delivery project for Oslo, built in small, tested stages.
 
-Stages 1–3 are complete. The project has a FastAPI backend, a Next.js setup page, PostgreSQL, SQLAlchemy models, Alembic migrations, two demo users, and a validated `POST /requests` endpoint. Stage 4 has not started; listing and retrieving requests through the API come later.
+Stages 1–4 are complete. The project has a FastAPI backend, a Next.js setup page, PostgreSQL, SQLAlchemy models, Alembic migrations, two demo users, and APIs to create, list, and retrieve delivery requests. Stage 5 has not started; accepting jobs comes later.
 
 ## Requirements
 
@@ -54,7 +54,8 @@ local-delivery/
 │       ├── test_health.py
 │       ├── test_migrations.py
 │       ├── test_models.py
-│       └── test_seed.py
+│       ├── test_seed.py
+│       └── test_view_requests.py
 └── frontend/
     ├── AGENTS.md
     ├── CLAUDE.md
@@ -70,6 +71,8 @@ local-delivery/
 Stage 2 added `compose.yaml`, backend configuration/session helpers, four model files, the seed command, Alembic configuration and three migration files, and five database/configuration test files. It updated `.env.example`, `requirements.txt`, this README, and the health endpoint's docstring. A local ignored `.env` was created with a generated password; no password is stored in source control.
 
 Stage 3 added `backend/app/api/requests.py`, `backend/app/schemas/__init__.py`, `backend/app/schemas/delivery_request.py`, and `backend/tests/test_create_request.py`. It updated `backend/app/main.py`, `backend/app/database.py` (docstring), `backend/tests/conftest.py`, `backend/requirements.txt` (direct Pydantic dependency), and this README. No database migration was needed.
+
+Stage 4 updated `backend/app/api/requests.py` and this README, and added `backend/tests/test_view_requests.py`. No model, migration, dependency, or frontend changes were needed.
 
 ## Quick start on this machine
 
@@ -187,6 +190,33 @@ Database constraint conflicts return **409**. Temporary database connection fail
 
 The live Swagger verification created request **1**, titled **Stage 3 Swagger test — groceries**, in the development database. It is intentionally left available for inspection. Additional successful submissions create additional records; request creation is not an upsert.
 
+## View requests (Stage 4)
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /requests` | HTTP 200 with a JSON array of `OPEN` requests only; newest first, with descending ID as a tie breaker |
+| `GET /requests/{request_id}` | HTTP 200 with the complete request, regardless of its status |
+
+The list returns `[]` when no open jobs exist. It includes all three categories. Filters and pagination are not implemented in this stage. Detail responses include every field from the creation response, including customer/helper IDs, addresses, amounts, deadline, status, and timestamps. A valid but missing ID returns HTTP **404** and `{"detail":"Request not found."}`. IDs must be positive integers within PostgreSQL's integer range; invalid IDs return **422**. Both endpoints return a safe **503** response if the database is temporarily unavailable.
+
+To test manually with both servers and PostgreSQL running:
+
+1. Open <http://localhost:8000/requests>. Confirm a JSON array containing only `OPEN` requests. Existing requests are preserved; the live check found requests 2 and 1, newest first.
+2. Open <http://localhost:8000/requests/1>. Confirm the complete record for the Stage 3 test request and HTTP 200.
+3. Open <http://localhost:8000/requests/2147483647>. Expect HTTP 404 and `Request not found.`
+4. Open <http://localhost:8000/requests/abc>. Expect HTTP 422 with the error pointing to `request_id`.
+5. For Swagger, refresh <http://localhost:8000/docs>, expand either new **GET** operation, and select **Try it out → Execute**. Enter `1` for the detail operation. The list operation needs no parameters.
+
+Equivalent terminal checks:
+
+```bash
+curl -i http://localhost:8000/requests
+curl -i http://localhost:8000/requests/1
+curl -i http://localhost:8000/requests/2147483647
+```
+
+If testing a fresh database with no requests, create one using Stage 3 first and use the returned ID. Status filtering is tested with all six statuses in isolated test schemas; Stage 4 adds no acceptance or status-update API.
+
 ## Run tests and checks
 
 Start PostgreSQL first, then:
@@ -199,11 +229,13 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 .venv/bin/python -m pip check
 ```
 
-Expect 70 passed tests, migration `0001 (head)`, and no schema changes detected. The health/configuration tests do not require PostgreSQL; run `pytest tests/test_health.py tests/test_config.py -q` for only those checks.
+Expect 88 passed tests, migration `0001 (head)`, and no schema changes detected. The health/configuration tests do not require PostgreSQL; run `pytest tests/test_health.py tests/test_config.py -q` for only those checks.
 
 Database tests run against actual PostgreSQL using the configured connection. Each test creates a uniquely named temporary schema, applies the real migration, commits and reads records, then removes only that schema. Tests verify all categories/status values, relationships, decimal amounts, timestamps, constraints, repeatable seeding, ID allocation, schema/model agreement, and upgrade/downgrade. They never clear the development tables and do not fall back to SQLite or skip missing database connections. Use this local development database for tests; the configured role needs permission to create schemas.
 
 Stage 3 adds 42 API tests covering successful creation in all categories, persistence from a separate database connection, required fields, invalid categories/rewards/budgets, text limits, customer IDs, deadlines, server-owned fields, optional values, unknown customers, and transaction rollback on database failures.
+
+Stage 4 adds 18 tests for empty lists, filtering out every non-OPEN status, category coverage, deterministic ordering, full details for all six statuses, create/list/retrieve integration, missing requests, invalid IDs, and database-unavailable responses. To run only these tests, use `.venv/bin/python -m pytest tests/test_view_requests.py -q` from `backend`.
 
 Frontend smoke test (with `npm run dev` running):
 
@@ -260,23 +292,26 @@ Verified on 2026-10-05:
 | PostgreSQL container | Healthy, bound to `127.0.0.1:5433` |
 | Alembic upgrade/current | `0001 (head)` applied |
 | Alembic schema comparison | No new upgrade operations detected |
-| Backend pytest | 70 passed |
+| Backend pytest | 88 passed |
 | Python dependency check | No broken requirements |
 | Development seed data | The two requested users |
 | Live Swagger `POST /requests` | HTTP 201, request 1 saved with status OPEN |
+| Live `GET /requests` | HTTP 200, existing OPEN requests returned newest first |
+| Live `GET /requests/1` | HTTP 200; complete record also verified in Swagger |
+| Live lookup for a missing ID | HTTP 404, `Request not found.` |
 | Temporary test schemas after tests | Zero remaining |
 | Frontend smoke test | 1 passed |
 | Running API `/health` and `/docs` | HTTP 200 |
 
-The Stage 1 production build, lint, type checking, and browser rendering also passed. Frontend code was not changed in Stages 2 or 3.
+The Stage 1 production build, lint, type checking, and browser rendering also passed. Frontend code was not changed in Stages 2–4.
 
 ## Suggested Git commit
 
 ```text
-feat: add delivery request creation API
+feat: add request listing and detail endpoints
 ```
 
-Stop here. Stage 4 will add request listing and retrieval when requested.
+Stop here. Stage 5 will add job acceptance when requested.
 
 ## References
 
