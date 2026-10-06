@@ -1,6 +1,8 @@
-# Local Delivery — Java backend migration
+# Local Delivery — Stage 5 DTOs and validation complete
 
 A local peer-to-peer delivery project for Oslo. The completed Python stages 1–4 have been migrated to Java 21, Spring Boot, and Maven: health checks, PostgreSQL models, demo users, validation, and create/list/detail APIs all work. These features correspond to the revised Java plan through Stage 7. Job acceptance (Stage 8) is next and has not been started.
+
+Stage 5 is now complete, including `AcceptRequestDto` and `UpdateStatusRequest`. These DTOs validate input for the future acceptance and status-update workflows; those endpoints and business rules will be implemented in Stages 8 and 9.
 
 The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
 
@@ -33,6 +35,7 @@ local-delivery/
 │       │   │   ├── repository/  UserRepository, DeliveryRequestRepository
 │       │   │   ├── model/       User, DeliveryRequest, RequestCategory, DeliveryStatus
 │       │   │   ├── dto/         CreateDeliveryRequestRequest, DeliveryRequestResponse,
+│       │   │   │                AcceptRequestDto, UpdateStatusRequest,
 │       │   │   │                OsloDeadlineDeserializer
 │       │   │   ├── exception/   ResourceNotFoundException, ApiExceptionHandler
 │       │   │   └── config/      DemoDataConfiguration, DatabaseMigrationConfiguration
@@ -46,6 +49,7 @@ local-delivery/
 │           ├── DeliveryApiTest.java
 │           ├── LegacyMigrationTest.java
 │           ├── ApiErrorTest.java
+│           ├── WorkflowDtoValidationTest.java
 │           └── PostgresTestDatabase.java
 └── frontend/  Existing Next.js application
 ```
@@ -141,13 +145,45 @@ Validation preserves the existing behavior:
 
 - All creation fields below are required except `shoppingBudget`, which may be omitted or null.
 - `customerId` must be a positive integer identifying an existing user; a missing customer returns 404.
-- Category is one of PACKAGE, BUY, or PICKUP.
+- Category is one of PACKAGE, BUY, or PICKUP. Enum names are case-sensitive; numeric enum values are rejected.
 - Title, description, and addresses must contain text. Surrounding whitespace is stripped. Titles allow 200 characters and addresses allow 500.
 - Amounts are nonnegative with up to eight integer digits and two decimal places. Zero reward is allowed. Response amounts are JSON strings for decimal precision.
 - Deadlines must be in the future. An explicit timezone offset is preferred; a timestamp without one is interpreted in Europe/Oslo. Ambiguous/nonexistent local times during daylight-saving changes require an explicit offset. Responses use UTC (`Z`).
 - Unknown fields, including client-supplied IDs, helper assignments, and status, are rejected.
 
 Invalid bodies or path IDs return 422. Database constraint conflicts return 409. Temporary database connection failures return 503 without exposing database exception details. Missing resources return 404. Failed service transactions roll back.
+
+## Stage 5 DTOs and validation
+
+All four planned request/response DTOs are present:
+
+| DTO | Fields and validation |
+| --- | --- |
+| `CreateDeliveryRequestRequest` | Validates customer ID, category, required text, amounts, and deadline as described above |
+| `DeliveryRequestResponse` | Complete response containing IDs, request details, amounts, status, and timestamps |
+| `AcceptRequestDto` | `helperId`: required positive `Long`; example `{"helperId":2}` |
+| `UpdateStatusRequest` | `status`: required `DeliveryStatus`; example `{"status":"PICKED_UP"}` |
+
+The new DTOs use Java records and Jakarta validation:
+
+```java
+public record AcceptRequestDto(@NotNull @Positive Long helperId) {}
+
+public record UpdateStatusRequest(@NotNull DeliveryStatus status) {}
+```
+
+`ApiExceptionHandler` already provides centralized validation errors. Missing or invalid constrained fields return 422 with field details. Malformed JSON, unknown enum names, numeric enums, incorrect JSON types, and extra fields return 422 with a safe error message. The new tests exercise these DTOs through isolated MockMvc controllers with the application's Jackson configuration and error handler.
+
+The test controllers live only in test sources and are excluded from application component scanning. They are not available on the running server. Acceptance and status-update routes are not added by this stage, so their DTOs will appear in Swagger when those routes are implemented. Helper existence, self-acceptance, concurrency, and valid status transitions are service rules for Stages 8 and 9; Stage 5 only validates the input shape and values.
+
+To verify this stage independently, run:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw -Dtest=WorkflowDtoValidationTest test
+```
+
+Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that future workflow routes and test-only routes are absent from OpenAPI.
 
 ## Manual testing
 
@@ -211,7 +247,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 80 tests cover health, creation in all categories, field validation, committed persistence from a separate connection, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests, deterministic order, details for all statuses, error responses, and populated legacy-schema migration.
+The 116 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, committed persistence from a separate connection, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests, deterministic order, details for all statuses, error responses, and populated legacy-schema migration.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -222,7 +258,9 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
 npm test
 ```
 
-Verified on 2026-10-06: 80 backend tests passed, the executable JAR built and started, migration reached V2 with existing records preserved, live health/list/detail/docs endpoints returned 200, and the frontend smoke test passed. The Python server was stopped and its implementation/configuration/tests were replaced by Java files.
+The Java migration was verified on 2026-10-06 with 80 passing tests, the executable JAR running, migration V2 applied with existing records preserved, live health/list/detail/docs endpoints returning 200, and the frontend smoke test passing. The Python server was stopped and its implementation/configuration/tests were replaced by Java files.
+
+Stage 5 completion adds 34 workflow DTO validation cases and two numeric-category regression cases. The full suite passes all 116 tests with no failures or skips. The updated executable JAR was built and restarted on port 8080; live health, docs, request listing, and 422 validation responses were verified without changing saved requests.
 
 ## Important implementation examples
 
@@ -248,12 +286,14 @@ List<DeliveryRequest> findByStatusOrderByCreatedAtDescIdDesc(DeliveryStatus stat
 
 This migration adds the Maven wrapper/build, Java packages, properties, Flyway scripts, and Java tests listed above. It removes the Python app, Python tests, requirements, and Alembic configuration/scripts. It updates `.env.example`, `.gitignore`, `compose.yaml`, and this README. Frontend source and existing credentials are unchanged.
 
+Stage 5 completion adds `AcceptRequestDto.java`, `UpdateStatusRequest.java`, and `WorkflowDtoValidationTest.java`. It updates `application.properties` to reject numeric enums, extends `DeliveryApiTest.java` for regression coverage, and updates this README. No database migration is required.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-refactor: migrate backend to Java and Spring Boot
+feat: add request DTOs and validation
 ```
 
 Stop here. The next requested stage can add the Java Stage 8 acceptance workflow and concurrency protection.

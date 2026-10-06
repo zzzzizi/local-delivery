@@ -147,6 +147,7 @@ class DeliveryApiTest {
     static Stream<Arguments> invalidInputs() {
         return Stream.of(
                 Arguments.of("category", "MEDICINE"), Arguments.of("category", "buy"),
+                Arguments.of("category", 0), Arguments.of("category", "0"),
                 Arguments.of("helperReward", -1), Arguments.of("helperReward", "not a number"),
                 Arguments.of("helperReward", "NaN"), Arguments.of("helperReward", "Infinity"),
                 Arguments.of("helperReward", new BigDecimal("12.345")),
@@ -340,6 +341,9 @@ class DeliveryApiTest {
                 .andExpect(jsonPath("$.paths['/api/requests'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/requests'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/requests/{id}'].get").exists())
-                .andExpect(jsonPath("$.paths['/api/requests/{id}/accept']").doesNotExist());
+                .andExpect(jsonPath("$.paths['/api/requests/{id}/accept']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/requests/{id}/status']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/test/dto/accept']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/test/dto/status']").doesNotExist());
     }
 }
