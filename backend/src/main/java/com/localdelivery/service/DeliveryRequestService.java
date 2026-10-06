@@ -7,8 +7,9 @@ import com.localdelivery.model.DeliveryRequest;
 import com.localdelivery.model.DeliveryStatus;
 import com.localdelivery.repository.DeliveryRequestRepository;
 import com.localdelivery.repository.UserRepository;
-import java.util.List;
+import jakarta.persistence.EntityManager;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,10 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class DeliveryRequestService {
     private final DeliveryRequestRepository requests;
     private final UserRepository users;
+    private final EntityManager entityManager;
 
-    public DeliveryRequestService(DeliveryRequestRepository requests, UserRepository users) {
+    public DeliveryRequestService(DeliveryRequestRepository requests, UserRepository users,
+                                  EntityManager entityManager) {
         this.requests = requests;
         this.users = users;
+        this.entityManager = entityManager;
     }
 
     @Transactional
@@ -37,7 +41,10 @@ public class DeliveryRequestService {
         request.setHelperReward(input.helperReward());
         request.setDeadline(input.deadline().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime());
         request.setStatus(DeliveryStatus.OPEN);
-        return DeliveryRequestResponse.from(requests.saveAndFlush(request));
+        var saved = requests.saveAndFlush(request);
+        // Return PostgreSQL's stored decimal scale and timestamp precision.
+        entityManager.refresh(saved);
+        return DeliveryRequestResponse.from(saved);
     }
 
     @Transactional(readOnly = true)

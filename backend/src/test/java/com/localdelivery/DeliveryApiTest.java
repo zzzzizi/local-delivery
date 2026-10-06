@@ -134,6 +134,38 @@ class DeliveryApiTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"0", "80", "80.2"})
+    void creationResponseMatchesCommittedRecord(String amount) throws Exception {
+        OffsetDateTime deadline = OffsetDateTime.now(ZoneOffset.ofHoursMinutes(5, 30))
+                .plusDays(1).withNano(123456789);
+        ObjectNode body = payload().put("shoppingBudget", new BigDecimal(amount))
+                .put("helperReward", new BigDecimal(amount)).put("deadline", deadline.toString());
+        JsonNode created = create(body);
+        long id = created.get("id").asLong();
+        JsonNode retrieved = json.readTree(mvc.perform(get("/api/requests/" + id))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(created).isEqualTo(retrieved);
+
+        // Verify the POST represents the actual committed values, including PostgreSQL precision.
+        try (var connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username, DATABASE.password);
+             var statement = connection.prepareStatement(
+                     "SELECT shopping_budget, helper_reward, deadline, created_at, updated_at FROM delivery_requests WHERE id = ?")) {
+            statement.setLong(1, id);
+            try (var result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(created.get("shoppingBudget").asText()).isEqualTo(result.getBigDecimal("shopping_budget").toPlainString());
+                assertThat(created.get("helperReward").asText()).isEqualTo(result.getBigDecimal("helper_reward").toPlainString());
+                assertThat(OffsetDateTime.parse(created.get("deadline").asText()).toLocalDateTime())
+                        .isEqualTo(result.getObject("deadline", LocalDateTime.class));
+                assertThat(OffsetDateTime.parse(created.get("createdAt").asText()).toLocalDateTime())
+                        .isEqualTo(result.getObject("created_at", LocalDateTime.class));
+                assertThat(OffsetDateTime.parse(created.get("updatedAt").asText()).toLocalDateTime())
+                        .isEqualTo(result.getObject("updated_at", LocalDateTime.class));
+            }
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"customerId", "category", "title", "description", "pickupAddress",
             "deliveryAddress", "helperReward", "deadline"})
     void requiredFields(String field) throws Exception {

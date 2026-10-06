@@ -1,8 +1,10 @@
-# Local Delivery — Stage 5 DTOs and validation complete
+# Local Delivery — Stage 6 create-request API complete
 
 A local peer-to-peer delivery project for Oslo. The completed Python stages 1–4 have been migrated to Java 21, Spring Boot, and Maven: health checks, PostgreSQL models, demo users, validation, and create/list/detail APIs all work. These features correspond to the revised Java plan through Stage 7. Job acceptance (Stage 8) is next and has not been started.
 
 Stage 5 is now complete, including `AcceptRequestDto` and `UpdateStatusRequest`. These DTOs validate input for the future acceptance and status-update workflows; those endpoints and business rules will be implemented in Stages 8 and 9.
+
+Stage 6 has been reviewed against every requirement. The existing create-request endpoint is complete, and its response now uses the exact decimal scale and timestamp precision stored in PostgreSQL.
 
 The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
 
@@ -185,6 +187,30 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 
 Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that future workflow routes and test-only routes are absent from OpenAPI.
 
+## Stage 6 creation API verification
+
+`POST /api/requests` uses the controller → transactional service → repository flow, validates the DTO, looks up the customer, creates an OPEN request with a null helper, saves timestamps, and returns HTTP 201 with the saved record.
+
+| Required case | Verified behavior |
+| --- | --- |
+| Successful creation | 201 for PACKAGE, BUY, and PICKUP; generated ID, OPEN status, null helper, and stored timestamps |
+| Customer not found | 404; no request saved |
+| Missing required title | 422 with a `title` field error; no request saved |
+| Invalid category | 422; no request saved |
+| Negative reward | 422 with a `helperReward` field error; no request saved |
+| Negative shopping budget | 422 with a `shoppingBudget` field error; no request saved |
+
+The review found that POST could return values with different precision from the saved row: for example, `"80.2"` instead of `"80.20"`, or a nanosecond deadline before PostgreSQL rounded it to microseconds. Creation now flushes and refreshes the entity in the same transaction before mapping the response. Three regression cases compare the entire POST and GET responses, then independently verify the monetary and timestamp values through JDBC.
+
+Run the API checks with PostgreSQL running:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw -Dtest=DeliveryApiTest test
+```
+
+Expect 81 passing API/model cases. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite contains 119 cases.
+
 ## Manual testing
 
 1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://localhost:8080/docs).
@@ -207,8 +233,8 @@ Expect 34 passing cases, including valid helper IDs, every known status, missing
 
 4. Execute. Expect 201, a generated ID, OPEN status, and a null helper. Each successful submission creates a new row.
 5. Execute `GET /api/requests`. The created request should appear first.
-6. Execute `GET /api/requests/{id}` using the returned ID. Confirm the saved fields and UTC deadline.
-7. Set `helperReward` to `-1` or remove `title`; creation must return 422 and save nothing. Use `customerId: 999999` to check the 404 error.
+6. Execute `GET /api/requests/{id}` using the returned ID. Confirm the saved fields and UTC deadline match the POST response exactly. Amounts use two decimal places; timestamps use PostgreSQL's precision.
+7. Make each of these changes separately to the original JSON: remove `title`, set `category` to `INVALID`, set `helperReward` to `-1`, or set `shoppingBudget` to `-1`. Each must return 422 and save nothing. Set `customerId` to `9223372036854775807` to check the 404 error.
 8. Fetch request ID `9223372036854775807`; expect 404. Use `abc` as the ID to check 422.
 
 Read-only terminal checks:
@@ -247,7 +273,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 116 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, committed persistence from a separate connection, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests, deterministic order, details for all statuses, error responses, and populated legacy-schema migration.
+The 119 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, committed persistence from a separate connection, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests, deterministic order, details for all statuses, error responses, and populated legacy-schema migration.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -260,7 +286,11 @@ npm test
 
 The Java migration was verified on 2026-10-06 with 80 passing tests, the executable JAR running, migration V2 applied with existing records preserved, live health/list/detail/docs endpoints returning 200, and the frontend smoke test passing. The Python server was stopped and its implementation/configuration/tests were replaced by Java files.
 
-Stage 5 completion adds 34 workflow DTO validation cases and two numeric-category regression cases. The full suite passes all 116 tests with no failures or skips. The updated executable JAR was built and restarted on port 8080; live health, docs, request listing, and 422 validation responses were verified without changing saved requests.
+Stage 5 completion added 34 workflow DTO validation cases and two numeric-category regression cases. Its suite passed all 116 tests with no failures or skips. The updated executable JAR was built and restarted on port 8080; live health, docs, request listing, and 422 validation responses were verified without changing saved requests.
+
+The Stage 6 review adds three precision regression cases, reproduced their failures before the fix, and passes all 119 backend tests after the fix.
+
+The updated JAR was built and started on port 8080. Live verification returned 201 for creation, 404 for a missing customer, and 422 for each of missing title, invalid category, negative reward, and negative shopping budget. The creation response exactly matched the subsequent GET response. Request **4**, titled **Stage 6 verification — groceries**, remains available for inspection at `/api/requests/4`; existing requests were unchanged, and failed submissions created no rows.
 
 ## Important implementation examples
 
@@ -280,7 +310,13 @@ The repository declares the available-jobs query:
 List<DeliveryRequest> findByStatusOrderByCreatedAtDescIdDesc(DeliveryStatus status);
 ```
 
-`DeliveryRequestService.create` runs in a transaction, checks the customer, sets OPEN status, saves the entity, and maps it to `DeliveryRequestResponse`.
+`DeliveryRequestService.create` runs in a transaction, checks the customer, sets OPEN status, and returns the saved entity's values:
+
+```java
+var saved = requests.saveAndFlush(request);
+entityManager.refresh(saved);
+return DeliveryRequestResponse.from(saved);
+```
 
 ## Files changed and Git
 
@@ -288,12 +324,14 @@ This migration adds the Maven wrapper/build, Java packages, properties, Flyway s
 
 Stage 5 completion adds `AcceptRequestDto.java`, `UpdateStatusRequest.java`, and `WorkflowDtoValidationTest.java`. It updates `application.properties` to reject numeric enums, extends `DeliveryApiTest.java` for regression coverage, and updates this README. No database migration is required.
 
+Stage 6 review changes only `DeliveryRequestService.java`, `DeliveryApiTest.java`, and this README. It adds no endpoint or database migration.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add request DTOs and validation
+fix: return persisted values in request creation responses
 ```
 
 Stop here. The next requested stage can add the Java Stage 8 acceptance workflow and concurrency protection.
