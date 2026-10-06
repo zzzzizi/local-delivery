@@ -22,3 +22,11 @@ next-env.d.ts
 .DS_Store
 *.log
 
+# Java, Maven, IDEs, and local database backups
+target/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+backups/

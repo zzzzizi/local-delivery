@@ -1,19 +1,18 @@
-# Local Delivery — Stage 4
+# Local Delivery — Java backend migration
 
-A local peer-to-peer delivery project for Oslo, built in small, tested stages.
+A local peer-to-peer delivery project for Oslo. The completed Python stages 1–4 have been migrated to Java 21, Spring Boot, and Maven: health checks, PostgreSQL models, demo users, validation, and create/list/detail APIs all work. These features correspond to the revised Java plan through Stage 7. Job acceptance (Stage 8) is next and has not been started.
 
-Stages 1–4 are complete. The project has a FastAPI backend, a Next.js setup page, PostgreSQL, SQLAlchemy models, Alembic migrations, two demo users, and APIs to create, list, and retrieve delivery requests. Stage 5 has not started; accepting jobs comes later.
+The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
 
-## Requirements
+## Stack and architecture
 
-- Python 3.11 or newer
-- Node.js 20.9 or newer and npm
-- Docker Desktop with Docker Compose, running
-- Free ports 8000 (backend), 3000 (frontend), and 5433 (this project's database)
+- Backend: Java 21, Spring Boot 3.5.16, Spring Web, Spring Data JPA/Hibernate, Jakarta Validation, Maven Wrapper 3.9.16.
+- Database: PostgreSQL, managed migrations with Flyway, schema validation with Hibernate.
+- API documentation: springdoc OpenAPI and Swagger UI.
+- Tests: JUnit 5, Spring Boot Test, MockMvc, and actual PostgreSQL.
+- Frontend: Next.js, React, TypeScript.
 
-Tested on macOS with Python 3.13.5, Node.js 22.17.0, and the official `postgres:17-alpine` image. Port 5433 was chosen because an existing unrelated PostgreSQL service already uses 5432. This project's container binds only to localhost and stores data in its own named Docker volume.
-
-## Files
+Controllers delegate to transactional services, services use repositories, and repositories persist JPA entities. Controllers return DTOs instead of entities. Dependencies use constructor injection.
 
 ```text
 local-delivery/
@@ -22,301 +21,239 @@ local-delivery/
 ├── compose.yaml
 ├── README.md
 ├── backend/
-│   ├── alembic.ini
-│   ├── requirements.txt
-│   ├── pytest.ini
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── seed.py
-│   │   ├── api/
-│   │   │   ├── __init__.py
-│   │   │   ├── health.py
-│   │   │   └── requests.py
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   ├── enums.py
-│   │   │   ├── user.py
-│   │   │   └── delivery_request.py
-│   │   └── schemas/
-│   │       ├── __init__.py
-│   │       └── delivery_request.py
-│   ├── migrations/
-│   │   ├── env.py
-│   │   ├── script.py.mako
-│   │   └── versions/0001_create_users_and_requests.py
-│   └── tests/
-│       ├── conftest.py
-│       ├── test_config.py
-│       ├── test_create_request.py
-│       ├── test_health.py
-│       ├── test_migrations.py
-│       ├── test_models.py
-│       ├── test_seed.py
-│       └── test_view_requests.py
-└── frontend/
-    ├── AGENTS.md
-    ├── CLAUDE.md
-    ├── src/app/{layout.tsx,page.tsx,globals.css}
-    ├── tests/home.test.mjs
-    ├── package.json
-    ├── package-lock.json
-    └── tsconfig.json
+│   ├── pom.xml
+│   ├── mvnw / mvnw.cmd
+│   ├── .mvn/wrapper/maven-wrapper.properties
+│   └── src/
+│       ├── main/
+│       │   ├── java/com/localdelivery/
+│       │   │   ├── LocalDeliveryApplication.java
+│       │   │   ├── controller/  HealthController, DeliveryRequestController
+│       │   │   ├── service/     DeliveryRequestService, DemoUserService
+│       │   │   ├── repository/  UserRepository, DeliveryRequestRepository
+│       │   │   ├── model/       User, DeliveryRequest, RequestCategory, DeliveryStatus
+│       │   │   ├── dto/         CreateDeliveryRequestRequest, DeliveryRequestResponse,
+│       │   │   │                OsloDeadlineDeserializer
+│       │   │   ├── exception/   ResourceNotFoundException, ApiExceptionHandler
+│       │   │   └── config/      DemoDataConfiguration, DatabaseMigrationConfiguration
+│       │   └── resources/
+│       │       ├── application.properties
+│       │       ├── application-dev.properties
+│       │       └── db/migration/
+│       │           ├── V1__initial_schema.sql
+│       │           └── V2__java_ids_and_utc_timestamps.sql
+│       └── test/java/com/localdelivery/
+│           ├── DeliveryApiTest.java
+│           ├── LegacyMigrationTest.java
+│           ├── ApiErrorTest.java
+│           └── PostgresTestDatabase.java
+└── frontend/  Existing Next.js application
 ```
 
-`local-delivery` is the project Git repository. `.env`, `.venv`, `node_modules`, `.next`, and generated Python/TypeScript caches are ignored. Frontend source is unchanged since Stage 1.
+## Prerequisites
 
-Stage 2 added `compose.yaml`, backend configuration/session helpers, four model files, the seed command, Alembic configuration and three migration files, and five database/configuration test files. It updated `.env.example`, `requirements.txt`, this README, and the health endpoint's docstring. A local ignored `.env` was created with a generated password; no password is stored in source control.
+- JDK 21, with `java` on PATH (`java -version`).
+- PostgreSQL available locally. This checkout retains its existing Docker Compose database; Docker Desktop must be running to use it. An independently installed PostgreSQL database also works.
+- Node.js 20.9+ and npm for the frontend.
+- Free ports 8080 (backend), 3000 (frontend), and 5433 (this checkout's PostgreSQL).
 
-Stage 3 added `backend/app/api/requests.py`, `backend/app/schemas/__init__.py`, `backend/app/schemas/delivery_request.py`, and `backend/tests/test_create_request.py`. It updated `backend/app/main.py`, `backend/app/database.py` (docstring), `backend/tests/conftest.py`, `backend/requirements.txt` (direct Pydantic dependency), and this README. No database migration was needed.
+No global Maven installation is needed. The wrapper downloads Maven and dependencies on first use. On Windows, use `mvnw.cmd` instead of `./mvnw`.
 
-Stage 4 updated `backend/app/api/requests.py` and this README, and added `backend/tests/test_view_requests.py`. No model, migration, dependency, or frontend changes were needed.
+## Start on this machine
 
-## Quick start on this machine
-
-The project folder is `/Users/yingjizheng/Documents/ChatGPT/LD/local-delivery`. Its `.env` and dependencies are already configured.
-
-Start the database and initialize it:
+The existing `.env` and PostgreSQL data have been preserved. Start the database from the project root, then start Java from `backend`:
 
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery
 docker compose up -d --wait db
 cd backend
-source .venv/bin/activate
-python -m alembic upgrade head
-python -m app.seed
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-The seed command is repeatable. It creates exactly these demo users and refuses to overwrite unrelated users occupying their IDs/emails:
+Flyway applies migrations at startup, Hibernate validates the schema, and the `dev` profile creates the two demo users if needed. Seeding is repeatable and refuses to overwrite unrelated users occupying their IDs or emails.
 
 | ID | Name | Email |
 | --- | --- | --- |
 | 1 | Customer Test | customer@example.com |
 | 2 | Helper Test | helper@example.com |
 
-Start the backend in that terminal:
-
-```bash
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Start the frontend in a second terminal:
+Start the frontend in another terminal:
 
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
 npm run dev
 ```
 
-Open <http://localhost:3000>, <http://localhost:8000/health>, and <http://localhost:8000/docs>. The health response remains `{"status":"ok"}`. It reports API liveness, not database readiness; use `docker compose ps` and the migration checks below to verify the database.
+Open [the frontend](http://localhost:3000), [API health](http://localhost:8080/api/health), and [Swagger UI](http://localhost:8080/docs).
 
-If the servers are already running, use them directly. Stop an earlier instance with `Ctrl+C` before restarting it. Use `docker compose stop db` from the project folder to stop just this project's database while retaining its data. Restart with `docker compose up -d --wait db`.
+If the servers are already running, use them directly. Stop a server with Ctrl+C before restarting. `docker compose stop db` stops this project's database while preserving its volume.
 
-## First-time setup on another machine
-
-1. Start Docker Desktop.
-2. From `local-delivery`, copy `.env.example` to `.env` and enter a unique `POSTGRES_PASSWORD`. Preserve the existing `.env` on this machine. No configuration needs to be copied into `backend`.
-3. Install backend dependencies:
-
-   ```bash
-   cd backend
-   python3 -m venv .venv
-   source .venv/bin/activate
-   python -m pip install -r requirements.txt
-   ```
-
-4. Install frontend dependencies with `npm ci` from `frontend`.
-5. Follow the quick-start commands above using your own checkout path.
-
-`app/config.py` loads the root `.env`; exported environment variables take precedence. It builds the PostgreSQL URL with `URL.create`, so passwords containing special characters work without manual URL escaping. Missing required settings produce an actionable error. Docker and Python use the same configuration.
-
-The Docker volume persists across container restarts. Changing a password in `.env` alone does not change the credentials already stored in an initialized PostgreSQL volume.
-
-## Database design
-
-`User` stores `id`, `name`, `email`, `phone`, `rating`, and `created_at`. Email is unique. Phone and rating are nullable because the demo users have neither a supplied phone number nor a rating; a supplied rating must be between 0 and 5.
-
-`DeliveryRequest` includes every requested field: `id`, `customer_id`, nullable `helper_id`, `category`, `title`, `description`, `pickup_address`, `delivery_address`, nullable `shopping_budget`, `helper_reward`, `deadline`, `status`, `created_at`, and `updated_at`.
-
-- The customer and helper foreign keys both reference `users.id`, with separate ORM relationships in each direction.
-- PostgreSQL enums store `PACKAGE`, `BUY`, `PICKUP`, and all six requested statuses.
-- New requests default to `OPEN` at the database level. Status transition rules belong to later API stages.
-- Money uses `NUMERIC(10, 2)` and Python `Decimal`, in NOK. Negative rewards and shopping budgets are rejected by database constraints.
-- Timestamps use PostgreSQL timestamps with time zone. `created_at` and `updated_at` are initialized by the database; SQLAlchemy refreshes `updated_at` when a request is updated through the ORM. Direct SQL updates must set `updated_at` explicitly.
-- Customer, helper, and status columns are indexed for future queries.
-
-Alembic owns schema creation; the application does not call `create_all` at startup. Migration `0001` creates both tables, enum types, constraints, and indexes. Its downgrade removes them; rollback is tested only in disposable test schemas.
-
-## Create a delivery request (Stage 3)
-
-`POST /requests` validates the body, checks that the customer exists, saves the request in one database transaction, and returns the complete record with HTTP **201 Created**. The database assigns the ID, timestamps, and default `OPEN` status. The helper starts as `null`.
-
-Validation rules:
-
-- All fields below are required except `shopping_budget`, which can be omitted or `null` for any category.
-- `customer_id` must be a positive integer referring to an existing user.
-- Category must be `PACKAGE`, `BUY`, or `PICKUP`.
-- Title, description, and addresses must contain non-whitespace text. Surrounding whitespace is trimmed; title length is limited to 200 characters and addresses to 500.
-- Amounts must be finite, nonnegative, at most 99,999,999.99 NOK, and have no more than two decimal places. Zero reward is permitted. Response amounts are JSON strings to preserve decimal precision.
-- The deadline must be in the future. Include an explicit timezone offset when possible. A datetime without one is interpreted in `Europe/Oslo`; responses use UTC.
-- Extra fields are rejected, including client-supplied `id`, `status`, or `helper_id`.
-
-To test in Swagger:
-
-1. Start PostgreSQL and the backend using the quick-start commands.
-2. Open <http://localhost:8000/docs#/requests/create_request_requests_post>.
-3. Expand **POST /requests**, click **Try it out**, and paste this JSON. Change the deadline to a future date if you are testing later.
-
-```json
-{
-  "customer_id": 1,
-  "category": "BUY",
-  "title": "Buy groceries",
-  "description": "Please buy milk, bread and eggs.",
-  "pickup_address": "KIWI Majorstuen, Oslo",
-  "delivery_address": "Frogner, Oslo",
-  "shopping_budget": 300,
-  "helper_reward": 80,
-  "deadline": "2026-10-06T18:00:00+02:00"
-}
-```
-
-4. Click **Execute**. Expect HTTP **201**, a new `id`, `status: "OPEN"`, `helper_id: null`, and the saved request information.
-5. Try `helper_reward: -1`, an invalid category, or remove the title. Each returns **422** with field-level details and saves no record.
-6. Try `customer_id: 999999`. Expect **404** with `Customer not found.`
-
-Database constraint conflicts return **409**. Temporary database connection failures return **503**. Failed transactions roll back, and database exception details are not included in those responses.
-
-The live Swagger verification created request **1**, titled **Stage 3 Swagger test — groceries**, in the development database. It is intentionally left available for inspection. Additional successful submissions create additional records; request creation is not an upsert.
-
-## View requests (Stage 4)
-
-| Endpoint | Behavior |
-| --- | --- |
-| `GET /requests` | HTTP 200 with a JSON array of `OPEN` requests only; newest first, with descending ID as a tie breaker |
-| `GET /requests/{request_id}` | HTTP 200 with the complete request, regardless of its status |
-
-The list returns `[]` when no open jobs exist. It includes all three categories. Filters and pagination are not implemented in this stage. Detail responses include every field from the creation response, including customer/helper IDs, addresses, amounts, deadline, status, and timestamps. A valid but missing ID returns HTTP **404** and `{"detail":"Request not found."}`. IDs must be positive integers within PostgreSQL's integer range; invalid IDs return **422**. Both endpoints return a safe **503** response if the database is temporarily unavailable.
-
-To test manually with both servers and PostgreSQL running:
-
-1. Open <http://localhost:8000/requests>. Confirm a JSON array containing only `OPEN` requests. Existing requests are preserved; the live check found requests 2 and 1, newest first.
-2. Open <http://localhost:8000/requests/1>. Confirm the complete record for the Stage 3 test request and HTTP 200.
-3. Open <http://localhost:8000/requests/2147483647>. Expect HTTP 404 and `Request not found.`
-4. Open <http://localhost:8000/requests/abc>. Expect HTTP 422 with the error pointing to `request_id`.
-5. For Swagger, refresh <http://localhost:8000/docs>, expand either new **GET** operation, and select **Try it out → Execute**. Enter `1` for the detail operation. The list operation needs no parameters.
-
-Equivalent terminal checks:
-
-```bash
-curl -i http://localhost:8000/requests
-curl -i http://localhost:8000/requests/1
-curl -i http://localhost:8000/requests/2147483647
-```
-
-If testing a fresh database with no requests, create one using Stage 3 first and use the returned ID. Status filtering is tested with all six statuses in isolated test schemas; Stage 4 adds no acceptance or status-update API.
-
-## Run tests and checks
-
-Start PostgreSQL first, then:
+To build and run an executable JAR (stop any running JAR before rebuilding it):
 
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
-.venv/bin/python -m pytest -q
-.venv/bin/python -m alembic current
-.venv/bin/python -m alembic check
-.venv/bin/python -m pip check
+./mvnw package
+java -jar target/local-delivery-0.1.0.jar --spring.profiles.active=dev
 ```
 
-Expect 88 passed tests, migration `0001 (head)`, and no schema changes detected. The health/configuration tests do not require PostgreSQL; run `pytest tests/test_health.py tests/test_config.py -q` for only those checks.
+## First-time setup and environment variables
 
-Database tests run against actual PostgreSQL using the configured connection. Each test creates a uniquely named temporary schema, applies the real migration, commits and reads records, then removes only that schema. Tests verify all categories/status values, relationships, decimal amounts, timestamps, constraints, repeatable seeding, ID allocation, schema/model agreement, and upgrade/downgrade. They never clear the development tables and do not fall back to SQLite or skip missing database connections. Use this local development database for tests; the configured role needs permission to create schemas.
+For a new checkout, copy `.env.example` to `.env` at the project root and fill in `DB_PASSWORD` before starting the database. Preserve the existing `.env` when upgrading. Run `npm ci` from `frontend` once, then follow the commands above using your own checkout path.
 
-Stage 3 adds 42 API tests covering successful creation in all categories, persistence from a separate database connection, required fields, invalid categories/rewards/budgets, text limits, customer IDs, deadlines, server-owned fields, optional values, unknown customers, and transaction rollback on database failures.
+| Variable | Default / purpose |
+| --- | --- |
+| `DB_HOST` | `127.0.0.1` |
+| `DB_PORT` | `5433`; use `5432` if your independently installed server uses it |
+| `DB_NAME` | `local_delivery` |
+| `DB_USERNAME` | `local_delivery` |
+| `DB_PASSWORD` | Required; no password is hardcoded |
+| `SERVER_PORT` | `8080` |
+| `SEED_DEMO_USERS` | `false` outside the dev profile; dev enables seeding |
 
-Stage 4 adds 18 tests for empty lists, filtering out every non-OPEN status, category coverage, deterministic ordering, full details for all six statuses, create/list/retrieve integration, missing requests, invalid IDs, and database-unavailable responses. To run only these tests, use `.venv/bin/python -m pytest tests/test_view_requests.py -q` from `backend`.
+Spring loads the root `.env` when started from `backend`, treating it as Java properties. Use unquoted values. Exported environment variables override file values for the same key. The old `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` names remain supported so the existing installation needs no secret changes; prefer the new `DB_*` keys and avoid defining both families at once.
 
-Frontend smoke test (with `npm run dev` running):
+The retained `compose.yaml` supports either naming family and only runs PostgreSQL. Backend/frontend Docker images have not been added. Its database port is bound to localhost and data stays in the existing named volume. Changing a password in `.env` does not change credentials already stored in an initialized database.
+
+For an external PostgreSQL installation, create the configured database and role yourself and omit the Docker commands. The role needs schema/table permissions; test runs also require permission to create and drop their own temporary schemas.
+
+## API changes from Python
+
+| Previous API | Java API |
+| --- | --- |
+| Port `8000` | Port `8080` |
+| `GET /health` | `GET /api/health` |
+| `POST /requests` | `POST /api/requests` |
+| `GET /requests` | `GET /api/requests` |
+| `GET /requests/{request_id}` | `GET /api/requests/{id}` |
+| JSON `customer_id`, `helper_reward`, etc. | JSON `customerId`, `helperReward`, etc. |
+| FastAPI error `detail` | Consistent `timestamp`, `status`, `error`, `message`, `fields` |
+
+Old URLs and snake_case request bodies are not compatibility aliases. Refresh old Swagger tabs using the new [documentation URL](http://localhost:8080/docs). OpenAPI JSON is at `/api/openapi.json`.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /api/health` | 200, `{"status":"ok"}`; liveness rather than database readiness |
+| `POST /api/requests` | 201, saved request with `status: "OPEN"` and `helperId: null` |
+| `GET /api/requests` | 200, array of OPEN requests, newest first; descending ID breaks timestamp ties |
+| `GET /api/requests/{id}` | 200, complete request regardless of status; 404 if missing |
+
+Validation preserves the existing behavior:
+
+- All creation fields below are required except `shoppingBudget`, which may be omitted or null.
+- `customerId` must be a positive integer identifying an existing user; a missing customer returns 404.
+- Category is one of PACKAGE, BUY, or PICKUP.
+- Title, description, and addresses must contain text. Surrounding whitespace is stripped. Titles allow 200 characters and addresses allow 500.
+- Amounts are nonnegative with up to eight integer digits and two decimal places. Zero reward is allowed. Response amounts are JSON strings for decimal precision.
+- Deadlines must be in the future. An explicit timezone offset is preferred; a timestamp without one is interpreted in Europe/Oslo. Ambiguous/nonexistent local times during daylight-saving changes require an explicit offset. Responses use UTC (`Z`).
+- Unknown fields, including client-supplied IDs, helper assignments, and status, are rejected.
+
+Invalid bodies or path IDs return 422. Database constraint conflicts return 409. Temporary database connection failures return 503 without exposing database exception details. Missing resources return 404. Failed service transactions roll back.
+
+## Manual testing
+
+1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://localhost:8080/docs).
+2. Expand `GET /api/health`, select **Try it out → Execute**, and expect 200 with `{"status":"ok"}`.
+3. Expand `POST /api/requests`, select **Try it out**, and paste the following JSON. Change the deadline if testing after the example date.
+
+```json
+{
+  "customerId": 1,
+  "category": "BUY",
+  "title": "Buy groceries",
+  "description": "Please buy milk, eggs and bread.",
+  "pickupAddress": "KIWI Majorstuen, Oslo",
+  "deliveryAddress": "Frogner, Oslo",
+  "shoppingBudget": 300,
+  "helperReward": 80,
+  "deadline": "2027-01-15T18:00:00+01:00"
+}
+```
+
+4. Execute. Expect 201, a generated ID, OPEN status, and a null helper. Each successful submission creates a new row.
+5. Execute `GET /api/requests`. The created request should appear first.
+6. Execute `GET /api/requests/{id}` using the returned ID. Confirm the saved fields and UTC deadline.
+7. Set `helperReward` to `-1` or remove `title`; creation must return 422 and save nothing. Use `customerId: 999999` to check the 404 error.
+8. Fetch request ID `9223372036854775807`; expect 404. Use `abc` as the ID to check 422.
+
+Read-only terminal checks:
+
+```bash
+curl -i http://localhost:8080/api/health
+curl -i http://localhost:8080/api/requests
+curl -i http://localhost:8080/api/requests/1
+curl -i http://localhost:8080/api/requests/9223372036854775807
+```
+
+## Data model and migration
+
+User and request IDs use Java `Long` and PostgreSQL `BIGINT`. Customer/helper relationships use separate `@ManyToOne` mappings to User, with helper nullable. PostgreSQL native enums retain all three categories and six statuses: OPEN, ACCEPTED, PICKED_UP, DELIVERING, DELIVERED, CANCELLED. Email uniqueness, rating bounds, foreign keys, nonnegative amounts, and existing indexes remain enforced by PostgreSQL.
+
+Money is `BigDecimal` / `NUMERIC(10,2)`. Entities use UTC `LocalDateTime`; the JDBC configuration binds these values directly to avoid shifts caused by the computer's timezone. JSON DTOs expose timestamps with a UTC offset. Entity lifecycle callbacks initialize timestamps and update `updatedAt` on ORM changes; direct SQL updates must set it explicitly.
+
+Flyway owns schema changes; `spring.jpa.hibernate.ddl-auto=validate` checks mappings without changing tables. For a fresh database, V1 creates the original schema and V2 widens IDs and normalizes timestamps. For this existing installation, the migration strategy recognizes exactly Alembic revision `0001`, baselines V1, and applies V2. Other legacy revisions and unknown nonempty schemas are rejected.
+
+V2 preserves each timestamp's instant using `AT TIME ZONE 'UTC'` before storing it as a timestamp without timezone. The old `alembic_version` marker remains for provenance; Flyway now owns migration history in `flyway_schema_history`.
+
+Before the live switch, backups were saved under the ignored `backups/` directory:
+
+- `before-java-cutover.dump`: final PostgreSQL custom-format backup.
+- `before-java-cutover-records.json`: complete record snapshot used for preservation checks.
+- `python-backend-before-migration.tar.gz`: committed Python backend source from `3f4ae96`.
+
+Both users and both existing requests were compared field by field after migration, including normalized timestamp instants. Do not run the old Python backend against the migrated database; recovering the old stack requires restoring its database backup into a separate database as well as restoring its source.
+
+## Tests and verification
+
+With PostgreSQL running:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw test
+```
+
+The 80 tests cover health, creation in all categories, field validation, committed persistence from a separate connection, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests, deterministic order, details for all statuses, error responses, and populated legacy-schema migration.
+
+Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
+
+With the frontend development server running:
 
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
 npm test
 ```
 
-Stage 1 also provides `npm run lint`, `npm run typecheck`, and `npm run build`. Stop the frontend development server before a production build; `npm start` serves that build on port 3000.
+Verified on 2026-10-06: 80 backend tests passed, the executable JAR built and started, migration reached V2 with existing records preserved, live health/list/detail/docs endpoints returned 200, and the frontend smoke test passed. The Python server was stopped and its implementation/configuration/tests were replaced by Java files.
 
-## Manually inspect Stage 2
+## Important implementation examples
 
-From the project folder, open a PostgreSQL shell without putting the password in a command:
+The controller only validates input and delegates:
 
-```bash
-cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```java
+@PostMapping
+@ResponseStatus(HttpStatus.CREATED)
+public DeliveryRequestResponse create(@Valid @RequestBody CreateDeliveryRequestRequest request) {
+    return service.create(request);
+}
 ```
 
-Run:
+The repository declares the available-jobs query:
 
-```sql
-\dt
-SELECT version_num FROM alembic_version;
-SELECT id, name, email FROM users ORDER BY id;
-SELECT COUNT(*) FROM delivery_requests;
+```java
+List<DeliveryRequest> findByStatusOrderByCreatedAtDescIdDesc(DeliveryStatus status);
 ```
 
-Expect the `users`, `delivery_requests`, and `alembic_version` tables; revision `0001`; and the two demo users above. The request count is zero before any API submissions. The live Stage 3 Swagger test added one request on this machine. Inspect it with `SELECT id, title, status, customer_id, helper_id FROM delivery_requests ORDER BY id;`.
+`DeliveryRequestService.create` runs in a transaction, checks the customer, sets OPEN status, saves the entity, and maps it to `DeliveryRequestResponse`.
 
-To manually save and read a request without leaving sample data behind:
+## Files changed and Git
 
-```sql
-BEGIN;
-INSERT INTO delivery_requests (
-    customer_id, category, title, description,
-    pickup_address, delivery_address, helper_reward, deadline
-) VALUES (
-    1, 'PACKAGE', 'Stage 2 test', 'A small test parcel',
-    'Majorstuen, Oslo', 'Frogner, Oslo', 80.25, NOW() + INTERVAL '1 day'
-) RETURNING id, customer_id, helper_id, status, helper_reward;
-SELECT title, status FROM delivery_requests WHERE title = 'Stage 2 test';
-ROLLBACK;
-```
+This migration adds the Maven wrapper/build, Java packages, properties, Flyway scripts, and Java tests listed above. It removes the Python app, Python tests, requirements, and Alembic configuration/scripts. It updates `.env.example`, `.gitignore`, `compose.yaml`, and this README. Frontend source and existing credentials are unchanged.
 
-Expect `customer_id = 1`, a null helper, status `OPEN`, and reward `80.25`. `ROLLBACK` removes the test row. PostgreSQL sequences may retain gaps after rollbacks; this is normal. Exit with `\q`.
+`.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
-## Verification results
-
-Verified on 2026-10-05:
-
-| Check | Result |
-| --- | --- |
-| PostgreSQL container | Healthy, bound to `127.0.0.1:5433` |
-| Alembic upgrade/current | `0001 (head)` applied |
-| Alembic schema comparison | No new upgrade operations detected |
-| Backend pytest | 88 passed |
-| Python dependency check | No broken requirements |
-| Development seed data | The two requested users |
-| Live Swagger `POST /requests` | HTTP 201, request 1 saved with status OPEN |
-| Live `GET /requests` | HTTP 200, existing OPEN requests returned newest first |
-| Live `GET /requests/1` | HTTP 200; complete record also verified in Swagger |
-| Live lookup for a missing ID | HTTP 404, `Request not found.` |
-| Temporary test schemas after tests | Zero remaining |
-| Frontend smoke test | 1 passed |
-| Running API `/health` and `/docs` | HTTP 200 |
-
-The Stage 1 production build, lint, type checking, and browser rendering also passed. Frontend code was not changed in Stages 2–4.
-
-## Suggested Git commit
+Suggested commit:
 
 ```text
-feat: add request listing and detail endpoints
+refactor: migrate backend to Java and Spring Boot
 ```
 
-Stop here. Stage 5 will add job acceptance when requested.
-
-## References
-
-- [SQLAlchemy relationships](https://docs.sqlalchemy.org/en/21/orm/basic_relationships.html)
-- [Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html)
-- [Official PostgreSQL Docker image](https://hub.docker.com/_/postgres)
-- [Next.js installation](https://nextjs.org/docs/app/getting-started/installation)
-- [FastAPI testing](https://fastapi.tiangolo.com/tutorial/testing/)
+Stop here. The next requested stage can add the Java Stage 8 acceptance workflow and concurrency protection.

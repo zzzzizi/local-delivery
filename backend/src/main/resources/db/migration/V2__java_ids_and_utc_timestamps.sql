@@ -1,0 +1,18 @@
+-- Preserve every ID and instant while adopting Long and UTC LocalDateTime.
+ALTER TABLE users ALTER COLUMN id TYPE BIGINT;
+ALTER TABLE delivery_requests
+    ALTER COLUMN id TYPE BIGINT,
+    ALTER COLUMN customer_id TYPE BIGINT,
+    ALTER COLUMN helper_id TYPE BIGINT;
+ALTER SEQUENCE users_id_seq AS BIGINT;
+ALTER SEQUENCE delivery_requests_id_seq AS BIGINT;
+
+ALTER TABLE users
+    ALTER COLUMN created_at TYPE TIMESTAMP WITHOUT TIME ZONE USING created_at AT TIME ZONE 'UTC',
+    ALTER COLUMN created_at SET DEFAULT (now() AT TIME ZONE 'UTC');
+ALTER TABLE delivery_requests
+    ALTER COLUMN deadline TYPE TIMESTAMP WITHOUT TIME ZONE USING deadline AT TIME ZONE 'UTC',
+    ALTER COLUMN created_at TYPE TIMESTAMP WITHOUT TIME ZONE USING created_at AT TIME ZONE 'UTC',
+    ALTER COLUMN updated_at TYPE TIMESTAMP WITHOUT TIME ZONE USING updated_at AT TIME ZONE 'UTC',
+    ALTER COLUMN created_at SET DEFAULT (now() AT TIME ZONE 'UTC'),
+    ALTER COLUMN updated_at SET DEFAULT (now() AT TIME ZONE 'UTC');
