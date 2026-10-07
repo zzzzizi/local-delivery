@@ -1,6 +1,7 @@
 package com.localdelivery.controller;
 
 import com.localdelivery.dto.CreateDeliveryRequestRequest;
+import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
 import com.localdelivery.service.DeliveryRequestService;
 import jakarta.validation.Valid;
@@ -29,6 +30,12 @@ public class DeliveryRequestController {
     @GetMapping
     public List<DeliveryRequestResponse> list() {
         return service.listOpen();
+    }
+
+    @PostMapping("/{id}/accept")
+    public DeliveryRequestResponse accept(@PathVariable @Positive Long id,
+                                          @Valid @RequestBody AcceptRequestDto request) {
+        return service.accept(id, request);
     }
 
     @GetMapping("/{id}")

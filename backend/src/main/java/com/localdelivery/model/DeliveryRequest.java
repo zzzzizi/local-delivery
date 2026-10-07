@@ -14,6 +14,10 @@ public class DeliveryRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "customer_id", nullable = false)
     private User customer;
@@ -74,6 +78,8 @@ public class DeliveryRequest {
     }
 
     public Long getId() { return id; }
+
+    public Long getVersion() { return version; }
 
     public User getCustomer() { return customer; }
     public void setCustomer(User customer) { this.customer = customer; }

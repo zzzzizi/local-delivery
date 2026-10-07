@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -43,6 +44,22 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     ResponseEntity<ApiError> conflict() {
         return response(HttpStatus.CONFLICT, "Request conflicts with existing data.", Map.of());
+    }
+
+    @ExceptionHandler(RequestNotOpenException.class)
+    ResponseEntity<ApiError> notOpen(RequestNotOpenException error) {
+        return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(SelfAcceptanceException.class)
+    ResponseEntity<ApiError> selfAcceptance(SelfAcceptanceException error) {
+        return response(HttpStatus.BAD_REQUEST, error.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> concurrentUpdate() {
+        return response(HttpStatus.CONFLICT,
+                "Delivery request changed during acceptance. Refresh and try again.", Map.of());
     }
 
     @ExceptionHandler({DataAccessResourceFailureException.class, CannotCreateTransactionException.class})

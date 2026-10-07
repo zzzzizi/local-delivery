@@ -1,10 +1,14 @@
-# Local Delivery — Stage 6 create-request API complete
+# Local Delivery — Stage 8 acceptance workflow complete
 
-A local peer-to-peer delivery project for Oslo. The completed Python stages 1–4 have been migrated to Java 21, Spring Boot, and Maven: health checks, PostgreSQL models, demo users, validation, and create/list/detail APIs all work. These features correspond to the revised Java plan through Stage 7. Job acceptance (Stage 8) is next and has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, and Maven. Health checks, PostgreSQL models, demo users, validation, create/list/detail APIs, and job acceptance are complete through Stage 8 of the Java plan. Stage 9 delivery-status updates are next and have not been started.
 
-Stage 5 is now complete, including `AcceptRequestDto` and `UpdateStatusRequest`. These DTOs validate input for the future acceptance and status-update workflows; those endpoints and business rules will be implemented in Stages 8 and 9.
+Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance now uses `AcceptRequestDto`; `UpdateStatusRequest` is ready for Stage 9.
 
 Stage 6 has been reviewed against every requirement. The existing create-request endpoint is complete, and its response now uses the exact decimal scale and timestamp precision stored in PostgreSQL.
+
+Stage 7 is also reviewed and complete. Listing returns OPEN requests newest first, details return the complete request in any status, and missing requests return 404. Expanded integration tests verify mixed datasets, complete response fields, and that reads do not change stored records.
+
+Stage 8 adds transactional acceptance with helper validation and optimistic locking. Only one helper can win a concurrent acceptance attempt; duplicate or competing attempts return 409.
 
 The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
 
@@ -39,16 +43,19 @@ local-delivery/
 │       │   │   ├── dto/         CreateDeliveryRequestRequest, DeliveryRequestResponse,
 │       │   │   │                AcceptRequestDto, UpdateStatusRequest,
 │       │   │   │                OsloDeadlineDeserializer
-│       │   │   ├── exception/   ResourceNotFoundException, ApiExceptionHandler
+│       │   │   ├── exception/   ResourceNotFoundException, RequestNotOpenException,
+│       │   │   │                SelfAcceptanceException, ApiExceptionHandler
 │       │   │   └── config/      DemoDataConfiguration, DatabaseMigrationConfiguration
 │       │   └── resources/
 │       │       ├── application.properties
 │       │       ├── application-dev.properties
 │       │       └── db/migration/
 │       │           ├── V1__initial_schema.sql
-│       │           └── V2__java_ids_and_utc_timestamps.sql
+│       │           ├── V2__java_ids_and_utc_timestamps.sql
+│       │           └── V3__request_optimistic_locking.sql
 │       └── test/java/com/localdelivery/
 │           ├── DeliveryApiTest.java
+│           ├── AcceptRequestApiTest.java
 │           ├── LegacyMigrationTest.java
 │           ├── ApiErrorTest.java
 │           ├── WorkflowDtoValidationTest.java
@@ -142,6 +149,7 @@ Old URLs and snake_case request bodies are not compatibility aliases. Refresh ol
 | `POST /api/requests` | 201, saved request with `status: "OPEN"` and `helperId: null` |
 | `GET /api/requests` | 200, array of OPEN requests, newest first; descending ID breaks timestamp ties |
 | `GET /api/requests/{id}` | 200, complete request regardless of status; 404 if missing |
+| `POST /api/requests/{id}/accept` | 200, complete accepted request with the chosen helper; 409 if no longer available |
 
 Validation preserves the existing behavior:
 
@@ -176,7 +184,7 @@ public record UpdateStatusRequest(@NotNull DeliveryStatus status) {}
 
 `ApiExceptionHandler` already provides centralized validation errors. Missing or invalid constrained fields return 422 with field details. Malformed JSON, unknown enum names, numeric enums, incorrect JSON types, and extra fields return 422 with a safe error message. The new tests exercise these DTOs through isolated MockMvc controllers with the application's Jackson configuration and error handler.
 
-The test controllers live only in test sources and are excluded from application component scanning. They are not available on the running server. Acceptance and status-update routes are not added by this stage, so their DTOs will appear in Swagger when those routes are implemented. Helper existence, self-acceptance, concurrency, and valid status transitions are service rules for Stages 8 and 9; Stage 5 only validates the input shape and values.
+The test controllers live only in test sources and are excluded from application component scanning. They are not available on the running server. Stage 5 only validates input shape and values. Stage 8 now exposes the acceptance DTO in Swagger and enforces helper existence, self-acceptance, and concurrency rules. The status-update route and transition rules remain for Stage 9.
 
 To verify this stage independently, run:
 
@@ -185,7 +193,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=WorkflowDtoValidationTest test
 ```
 
-Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that future workflow routes and test-only routes are absent from OpenAPI.
+Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that the future status-update route and test-only routes are absent from OpenAPI.
 
 ## Stage 6 creation API verification
 
@@ -209,9 +217,91 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=DeliveryApiTest test
 ```
 
-Expect 81 passing API/model cases. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite contains 119 cases.
+The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 155 cases, including the separate acceptance suite.
 
-## Manual testing
+## Stage 7 listing and detail verification
+
+| Required behavior | Verified result |
+| --- | --- |
+| `GET /api/requests` lists OPEN requests | 200 with complete DTOs for all categories and customers; newest creation time first, then highest ID |
+| Non-OPEN requests are excluded | ACCEPTED, PICKED_UP, DELIVERING, DELIVERED, and CANCELLED records are excluded, including when they are newer than OPEN records |
+| `GET /api/requests/{id}` retrieves one request | 200 with every field, including helper ID, exact monetary values, and timestamps, for all six statuses |
+| Request not found | 404 with the consistent API error response |
+
+An empty available-jobs list returns `[]`. Invalid or nonpositive IDs return 422. Both endpoints use read-only service transactions and return DTOs; database snapshots in the integration tests confirm that reads leave records unchanged. Database-connection failures return safe 503 errors for both endpoints. Filtering and pagination remain optional future additions.
+
+The existing application code satisfied the requirements. This review strengthens tests without changing the running API: a mixed dataset includes all three OPEN categories, two customers, and every non-OPEN status; the per-status tests compare every response field; both read paths are checked for database failure handling.
+
+With PostgreSQL running, verify the API and error cases:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw -Dtest=DeliveryApiTest,ApiErrorTest test
+```
+
+Manual Stage 7 checks require no data changes:
+
+1. Open [the available requests](http://localhost:8080/api/requests). Expect HTTP 200, OPEN statuses only, and descending creation time/ID.
+2. Open [request 4](http://localhost:8080/api/requests/4), the Stage 6 verification record. Expect HTTP 200 and the same complete fields as its list entry. On a fresh database, use the ID of a request you created.
+3. Open [a missing request](http://localhost:8080/api/requests/9223372036854775807). Expect HTTP 404 and `Delivery request not found.`
+4. Open [an invalid request ID](http://localhost:8080/api/requests/abc). Expect HTTP 422.
+5. In [Swagger UI](http://localhost:8080/docs), expand either GET request operation and select **Try it out → Execute**. The list needs no parameters; details require an existing ID.
+
+Mixed-status filtering and empty-list behavior are verified in isolated test schemas; no development request needs to be edited to test them.
+
+## Stage 8 — accept a request
+
+`POST /api/requests/{id}/accept` accepts this body:
+
+```json
+{"helperId": 2}
+```
+
+The controller validates the ID and DTO and delegates to `DeliveryRequestService.accept`. Within one transaction, the service loads the request, checks that it is OPEN and unassigned, verifies the helper exists and differs from the customer, assigns that helper, and changes the status to ACCEPTED. It saves the update, refreshes database values, and returns the complete request. `createdAt` remains unchanged, `updatedAt` advances, and the accepted request disappears from the default OPEN listing.
+
+| Case | Response |
+| --- | --- |
+| Successful acceptance | 200; assigned `helperId`, status ACCEPTED |
+| Missing request or helper | 404 with an explanatory message |
+| Customer accepts their own request | 400; request unchanged |
+| Request is already accepted or has any other non-OPEN status | 409; original assignment unchanged |
+| A competing transaction wins first | 409; original assignment unchanged |
+| Invalid body or request ID | 422; request unchanged |
+
+Repeated acceptance is rejected even for the same helper. A legacy OPEN record that already has a helper is also rejected so acceptance cannot overwrite an assignment. Availability is checked before helper lookup; an unavailable request returns 409 even if the supplied helper is missing.
+
+Concurrency protection uses `@Version` on `DeliveryRequest`. Flyway V3 adds `version BIGINT NOT NULL DEFAULT 0` for existing rows. Hibernate checks and increments the version when updating a request; a stale competing update rolls back and the error handler returns 409. The version is internal and is not exposed in response DTOs or accepted from clients. See [Hibernate's optimistic locking documentation](https://docs.hibernate.org/orm/6.6/userguide/html_single/#locking-optimistic).
+
+The tests include a deterministic race: two PostgreSQL transactions load the same OPEN version before either updates it, then exactly one commits. A separate pair of simultaneous MockMvc requests returns one 200 and one 409. Other cases cover every category, every non-OPEN status, missing users/requests, self-acceptance, repeated acceptance, invalid bodies/IDs, timestamps, persisted assignment, and removal from OPEN jobs.
+
+Run the 34 acceptance cases with PostgreSQL running:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw -Dtest=AcceptRequestApiTest test
+```
+
+Manual checks on the running app:
+
+1. Refresh [Swagger UI](http://localhost:8080/docs). Create a new request using customer 1 and the sample in the next section. Note its returned ID.
+2. Expand **POST /api/requests/{id}/accept**, select **Try it out**, enter that ID, and submit `{"helperId":1}`. Expect 400; the customer cannot accept their own request.
+3. Submit `{"helperId":9223372036854775807}`. Expect 404 for the missing helper; the request remains OPEN.
+4. Submit `{"helperId":2}`. Expect 200, `helperId: 2`, and `status: "ACCEPTED"`.
+5. Fetch the request by ID. Its complete response should match the acceptance response. Fetch the OPEN list; the accepted request should be absent.
+6. Submit `{"helperId":2}` again. Expect 409, with the original helper and timestamps preserved.
+7. To check invalid input, submit `{}` or `{"helperId":0}` and expect 422. Use a missing request ID to check 404.
+
+For terminal testing, replace `REQUEST_ID` with the newly created ID:
+
+```bash
+curl -i -X POST http://localhost:8080/api/requests/REQUEST_ID/accept \
+  -H 'Content-Type: application/json' \
+  -d '{"helperId":2}'
+```
+
+The live verification created and accepted request **6**, titled **Stage 8 verification — acceptance**. It remains available at [request 6](http://localhost:8080/api/requests/6). Use a newly created OPEN request to repeat the successful acceptance step.
+
+## Manual creation and viewing tests
 
 1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://localhost:8080/docs).
 2. Expand `GET /api/health`, select **Try it out → Execute**, and expect 200 with `{"status":"ok"}`.
@@ -250,9 +340,9 @@ curl -i http://localhost:8080/api/requests/9223372036854775807
 
 User and request IDs use Java `Long` and PostgreSQL `BIGINT`. Customer/helper relationships use separate `@ManyToOne` mappings to User, with helper nullable. PostgreSQL native enums retain all three categories and six statuses: OPEN, ACCEPTED, PICKED_UP, DELIVERING, DELIVERED, CANCELLED. Email uniqueness, rating bounds, foreign keys, nonnegative amounts, and existing indexes remain enforced by PostgreSQL.
 
-Money is `BigDecimal` / `NUMERIC(10,2)`. Entities use UTC `LocalDateTime`; the JDBC configuration binds these values directly to avoid shifts caused by the computer's timezone. JSON DTOs expose timestamps with a UTC offset. Entity lifecycle callbacks initialize timestamps and update `updatedAt` on ORM changes; direct SQL updates must set it explicitly.
+Money is `BigDecimal` / `NUMERIC(10,2)`. Entities use UTC `LocalDateTime`; the JDBC configuration binds these values directly to avoid shifts caused by the computer's timezone. JSON DTOs expose timestamps with a UTC offset. Entity lifecycle callbacks initialize timestamps and update `updatedAt` on ORM changes. Direct SQL maintenance updates must explicitly update `updatedAt` and increment `version` to participate in concurrency protection.
 
-Flyway owns schema changes; `spring.jpa.hibernate.ddl-auto=validate` checks mappings without changing tables. For a fresh database, V1 creates the original schema and V2 widens IDs and normalizes timestamps. For this existing installation, the migration strategy recognizes exactly Alembic revision `0001`, baselines V1, and applies V2. Other legacy revisions and unknown nonempty schemas are rejected.
+Flyway owns schema changes; `spring.jpa.hibernate.ddl-auto=validate` checks mappings without changing tables. For a fresh database, V1 creates the original schema, V2 widens IDs and normalizes timestamps, and V3 adds optimistic locking. For a legacy installation, the migration strategy recognizes exactly Alembic revision `0001`, baselines V1, and applies V2 and V3. A Java V2 installation applies only V3. Other legacy revisions and unknown nonempty schemas are rejected.
 
 V2 preserves each timestamp's instant using `AT TIME ZONE 'UTC'` before storing it as a timestamp without timezone. The old `alembic_version` marker remains for provenance; Flyway now owns migration history in `flyway_schema_history`.
 
@@ -264,6 +354,8 @@ Before the live switch, backups were saved under the ignored `backups/` director
 
 Both users and both existing requests were compared field by field after migration, including normalized timestamp instants. Do not run the old Python backend against the migrated database; recovering the old stack requires restoring its database backup into a separate database as well as restoring its source.
 
+Before the Stage 8 migration, another local backup was saved to `backups/before-stage8-migration.dump`, with a record snapshot in `backups/before-stage8-records.json`. All two existing users and four requests were preserved, with existing requests receiving version zero. Only the newly created Stage 8 sample was accepted during live verification.
+
 ## Tests and verification
 
 With PostgreSQL running:
@@ -273,7 +365,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 119 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, committed persistence from a separate connection, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests, deterministic order, details for all statuses, error responses, and populated legacy-schema migration.
+The 155 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, safe errors, populated legacy-schema migration through V3, and the full acceptance workflow including real concurrent transactions.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -288,9 +380,13 @@ The Java migration was verified on 2026-10-06 with 80 passing tests, the executa
 
 Stage 5 completion added 34 workflow DTO validation cases and two numeric-category regression cases. Its suite passed all 116 tests with no failures or skips. The updated executable JAR was built and restarted on port 8080; live health, docs, request listing, and 422 validation responses were verified without changing saved requests.
 
-The Stage 6 review adds three precision regression cases, reproduced their failures before the fix, and passes all 119 backend tests after the fix.
+The Stage 6 review added three precision regression cases, reproduced their failures before the fix, and passed all 119 backend tests after the fix.
 
 The updated JAR was built and started on port 8080. Live verification returned 201 for creation, 404 for a missing customer, and 422 for each of missing title, invalid category, negative reward, and negative shopping budget. The creation response exactly matched the subsequent GET response. Request **4**, titled **Stage 6 verification — groceries**, remains available for inspection at `/api/requests/4`; existing requests were unchanged, and failed submissions created no rows.
+
+Stage 7 verification on 2026-10-06 passed all 120 tests. The running application returned requests 5, 4, 2, and 1 in newest-first order, with each detail response matching its complete list entry. Missing IDs returned 404 and invalid IDs returned 422. Database snapshots before and after the live checks confirmed that every saved user and request was unchanged. No application-code change or restart was needed.
+
+Stage 8 verification on 2026-10-06 passed all 155 tests with no failures or skips. The JAR was built and restarted, Flyway V3 applied successfully, and all existing records matched the saved backup. Live acceptance returned 200 for helper 2, removed request 6 from OPEN jobs, and persisted version 1. Missing resources returned 404, self-acceptance returned 400, invalid helper input returned 422, and repeated acceptance returned 409. Previous requests were unchanged.
 
 ## Important implementation examples
 
@@ -310,10 +406,27 @@ The repository declares the available-jobs query:
 List<DeliveryRequest> findByStatusOrderByCreatedAtDescIdDesc(DeliveryStatus status);
 ```
 
+The listing service explicitly selects OPEN requests and maps the results to DTOs:
+
+```java
+return requests.findByStatusOrderByCreatedAtDescIdDesc(DeliveryStatus.OPEN)
+        .stream().map(DeliveryRequestResponse::from).toList();
+```
+
 `DeliveryRequestService.create` runs in a transaction, checks the customer, sets OPEN status, and returns the saved entity's values:
 
 ```java
 var saved = requests.saveAndFlush(request);
+entityManager.refresh(saved);
+return DeliveryRequestResponse.from(saved);
+```
+
+Acceptance uses the same transaction and persistence pattern after checking eligibility:
+
+```java
+request.setHelper(helper);
+request.setStatus(DeliveryStatus.ACCEPTED);
+var saved = requests.saveAndFlush(request); // Checks @Version against the stored row.
 entityManager.refresh(saved);
 return DeliveryRequestResponse.from(saved);
 ```
@@ -326,12 +439,16 @@ Stage 5 completion adds `AcceptRequestDto.java`, `UpdateStatusRequest.java`, and
 
 Stage 6 review changes only `DeliveryRequestService.java`, `DeliveryApiTest.java`, and this README. It adds no endpoint or database migration.
 
+Stage 7 review changes `DeliveryApiTest.java`, `ApiErrorTest.java`, and this README. It strengthens filtering, full-response, read-only, and error-response checks. The controller, service, repository, and database schema already satisfy this stage.
+
+Stage 8 creates `RequestNotOpenException.java`, `SelfAcceptanceException.java`, `V3__request_optimistic_locking.sql`, and `AcceptRequestApiTest.java`. It updates `DeliveryRequestController.java`, `DeliveryRequestService.java`, `DeliveryRequest.java`, `ApiExceptionHandler.java`, `DeliveryApiTest.java`, `ApiErrorTest.java`, `LegacyMigrationTest.java`, and this README. The earlier uncommitted Stage 7 test/documentation changes are retained.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-fix: return persisted values in request creation responses
+feat: add delivery request acceptance workflow
 ```
 
-Stop here. The next requested stage can add the Java Stage 8 acceptance workflow and concurrency protection.
+Stop here. Stage 9 will add delivery-status updates and valid transition rules when requested.

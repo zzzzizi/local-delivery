@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.DriverManager;
 import java.time.*;
+import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -27,6 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.springframework.test.json.JsonCompareMode.STRICT;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -258,7 +260,11 @@ class DeliveryApiTest {
     @Test
     void unknownRequest() throws Exception {
         mvc.perform(get("/api/requests/9223372036854775807"))
-                .andExpect(status().isNotFound()).andExpect(jsonPath("$.message").value("Delivery request not found."));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.timestamp").isString())
+                .andExpect(jsonPath("$.message").value("Delivery request not found."));
     }
 
     @ParameterizedTest
@@ -270,13 +276,42 @@ class DeliveryApiTest {
     @ParameterizedTest
     @EnumSource(DeliveryStatus.class)
     void everyStatusCanBeRetrievedButOnlyOpenIsListed(DeliveryStatus status) throws Exception {
-        long id = create(payload()).get("id").asLong();
+        JsonNode created = create(payload());
+        long id = created.get("id").asLong();
+        Long helperId = status == DeliveryStatus.OPEN || status == DeliveryStatus.CANCELLED ? null : 2L;
         jdbc.update("UPDATE delivery_requests SET status = ?::request_status, helper_id = ? WHERE id = ?",
-                status.name(), status == DeliveryStatus.OPEN || status == DeliveryStatus.CANCELLED ? null : 2L, id);
+                status.name(), helperId, id);
+        ObjectNode expected = created.deepCopy();
+        expected.put("status", status.name());
+        expected.set("helperId", json.valueToTree(helperId));
+        var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
+
         mvc.perform(get("/api/requests/" + id)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value(status.name()));
-        mvc.perform(get("/api/requests")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(status == DeliveryStatus.OPEN ? 1 : 0));
+                .andExpect(content().json(expected.toString(), STRICT));
+        JsonNode listed = json.readTree(mvc.perform(get("/api/requests"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(listed).isEqualTo(status == DeliveryStatus.OPEN
+                ? json.createArrayNode().add(expected) : json.createArrayNode());
+        assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
+    }
+
+    @Test
+    void mixedListingIncludesAllOpenCategoriesAndCustomersWithoutChangingRecords() throws Exception {
+        JsonNode oldest = create(payload().put("category", "PACKAGE").put("title", "Oldest open request"));
+        JsonNode middle = create(payload().put("customerId", 2).put("title", "Another customer's open request"));
+        JsonNode newest = create(payload().put("category", "PICKUP").put("title", "Newest open request"));
+        for (DeliveryStatus status : DeliveryStatus.values()) {
+            if (status == DeliveryStatus.OPEN) continue;
+            long id = create(payload().put("title", "Excluded " + status)).get("id").asLong();
+            jdbc.update("UPDATE delivery_requests SET status = ?::request_status, helper_id = ? WHERE id = ?",
+                    status.name(), status == DeliveryStatus.CANCELLED ? null : 2L, id);
+        }
+        var before = jdbc.queryForList("SELECT * FROM delivery_requests ORDER BY id");
+
+        JsonNode listed = json.readTree(mvc.perform(get("/api/requests"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(listed).isEqualTo(json.valueToTree(List.of(newest, middle, oldest)));
+        assertThat(jdbc.queryForList("SELECT * FROM delivery_requests ORDER BY id")).isEqualTo(before);
     }
 
     @Test
@@ -373,7 +408,8 @@ class DeliveryApiTest {
                 .andExpect(jsonPath("$.paths['/api/requests'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/requests'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/requests/{id}'].get").exists())
-                .andExpect(jsonPath("$.paths['/api/requests/{id}/accept']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/requests/{id}/accept'].post").exists())
+                .andExpect(jsonPath("$.components.schemas.AcceptRequestDto").exists())
                 .andExpect(jsonPath("$.paths['/api/requests/{id}/status']").doesNotExist())
                 .andExpect(jsonPath("$.paths['/test/dto/accept']").doesNotExist())
                 .andExpect(jsonPath("$.paths['/test/dto/status']").doesNotExist());
