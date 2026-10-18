@@ -59,7 +59,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ResponseEntity<ApiError> concurrentUpdate() {
         return response(HttpStatus.CONFLICT,
-                "Delivery request changed during acceptance. Refresh and try again.", Map.of());
+                "Delivery request changed during update. Refresh and try again.", Map.of());
+    }
+
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    ResponseEntity<ApiError> invalidTransition(InvalidStatusTransitionException error) {
+        return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
     }
 
     @ExceptionHandler({DataAccessResourceFailureException.class, CannotCreateTransactionException.class})

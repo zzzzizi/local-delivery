@@ -2,12 +2,15 @@ package com.localdelivery;
 
 import com.localdelivery.controller.DeliveryRequestController;
 import com.localdelivery.dto.AcceptRequestDto;
+import com.localdelivery.dto.UpdateStatusRequest;
 import com.localdelivery.exception.ApiExceptionHandler;
+import com.localdelivery.model.DeliveryStatus;
 import com.localdelivery.service.DeliveryRequestService;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.CannotCreateTransactionException;
 
@@ -26,10 +29,13 @@ class ApiErrorTest {
             var service = mock(DeliveryRequestService.class);
             when(service.listOpen()).thenThrow(failure);
             when(service.get(1L)).thenThrow(failure);
+            when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP))).thenThrow(failure);
             var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service))
                     .setControllerAdvice(new ApiExceptionHandler()).build();
-            for (String path : new String[]{"/api/requests", "/api/requests/1"}) {
-                mvc.perform(get(path)).andExpect(status().isServiceUnavailable())
+            for (var request : new MockHttpServletRequestBuilder[]{
+                    get("/api/requests"), get("/api/requests/1"),
+                    patch("/api/requests/1/status").contentType("application/json").content("{\"status\":\"PICKED_UP\"}")}) {
+                mvc.perform(request).andExpect(status().isServiceUnavailable())
                         .andExpect(jsonPath("$.status").value(503))
                         .andExpect(jsonPath("$.message").value("Database temporarily unavailable. Try again later."))
                         .andExpect(content().string(not(containsString("private database details"))));
@@ -38,17 +44,23 @@ class ApiErrorTest {
     }
 
     @Test
-    void concurrentAcceptanceReturnsSafeConflict() throws Exception {
+    void concurrentUpdatesReturnSafeConflict() throws Exception {
         var service = mock(DeliveryRequestService.class);
         when(service.accept(1L, new AcceptRequestDto(2L)))
                 .thenThrow(new ObjectOptimisticLockingFailureException("private persistence details", null));
+        when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP)))
+                .thenThrow(new ObjectOptimisticLockingFailureException("private persistence details", null));
         var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service))
                 .setControllerAdvice(new ApiExceptionHandler()).build();
-        mvc.perform(post("/api/requests/1/accept").contentType("application/json").content("{\"helperId\":2}"))
+        for (var request : new MockHttpServletRequestBuilder[]{
+                post("/api/requests/1/accept").content("{\"helperId\":2}"),
+                patch("/api/requests/1/status").content("{\"status\":\"PICKED_UP\"}")}) {
+            mvc.perform(request.contentType("application/json"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.message").value("Delivery request changed during acceptance. Refresh and try again."))
+                .andExpect(jsonPath("$.message").value("Delivery request changed during update. Refresh and try again."))
                 .andExpect(content().string(not(containsString("private persistence details"))));
+        }
     }
 
     @Test

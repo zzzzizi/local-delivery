@@ -3,6 +3,7 @@ package com.localdelivery.controller;
 import com.localdelivery.dto.CreateDeliveryRequestRequest;
 import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
+import com.localdelivery.dto.UpdateStatusRequest;
 import com.localdelivery.service.DeliveryRequestService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -36,6 +37,12 @@ public class DeliveryRequestController {
     public DeliveryRequestResponse accept(@PathVariable @Positive Long id,
                                           @Valid @RequestBody AcceptRequestDto request) {
         return service.accept(id, request);
+    }
+
+    @PatchMapping("/{id}/status")
+    public DeliveryRequestResponse updateStatus(@PathVariable @Positive Long id,
+                                                @Valid @RequestBody UpdateStatusRequest request) {
+        return service.updateStatus(id, request);
     }
 
     @GetMapping("/{id}")

@@ -410,7 +410,8 @@ class DeliveryApiTest {
                 .andExpect(jsonPath("$.paths['/api/requests/{id}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/requests/{id}/accept'].post").exists())
                 .andExpect(jsonPath("$.components.schemas.AcceptRequestDto").exists())
-                .andExpect(jsonPath("$.paths['/api/requests/{id}/status']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/requests/{id}/status'].patch").exists())
+                .andExpect(jsonPath("$.components.schemas.UpdateStatusRequest").exists())
                 .andExpect(jsonPath("$.paths['/test/dto/accept']").doesNotExist())
                 .andExpect(jsonPath("$.paths['/test/dto/status']").doesNotExist());
     }

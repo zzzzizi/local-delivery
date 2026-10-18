@@ -1,14 +1,16 @@
-# Local Delivery — Stage 8 acceptance workflow complete
+# Local Delivery — Stage 9 delivery status API complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, and Maven. Health checks, PostgreSQL models, demo users, validation, create/list/detail APIs, and job acceptance are complete through Stage 8 of the Java plan. Stage 9 delivery-status updates are next and have not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, and Maven. Health checks, PostgreSQL models, demo users, validation, create/list/detail APIs, job acceptance, and delivery-status updates are complete through Stage 9 of the Java plan. Stage 10's broader error-handling review is next.
 
-Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance now uses `AcceptRequestDto`; `UpdateStatusRequest` is ready for Stage 9.
+Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
 Stage 6 has been reviewed against every requirement. The existing create-request endpoint is complete, and its response now uses the exact decimal scale and timestamp precision stored in PostgreSQL.
 
 Stage 7 is also reviewed and complete. Listing returns OPEN requests newest first, details return the complete request in any status, and missing requests return 404. Expanded integration tests verify mixed datasets, complete response fields, and that reads do not change stored records.
 
 Stage 8 adds transactional acceptance with helper validation and optimistic locking. Only one helper can win a concurrent acceptance attempt; duplicate or competing attempts return 409.
+
+Stage 9 adds the status PATCH endpoint and centralized transitions through pickup, delivery, and completion. Cancellation is allowed before pickup. Invalid transitions and competing updates return 409 without overwriting saved state.
 
 The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
 
@@ -44,7 +46,8 @@ local-delivery/
 │       │   │   │                AcceptRequestDto, UpdateStatusRequest,
 │       │   │   │                OsloDeadlineDeserializer
 │       │   │   ├── exception/   ResourceNotFoundException, RequestNotOpenException,
-│       │   │   │                SelfAcceptanceException, ApiExceptionHandler
+│       │   │   │                SelfAcceptanceException, InvalidStatusTransitionException,
+│       │   │   │                ApiExceptionHandler
 │       │   │   └── config/      DemoDataConfiguration, DatabaseMigrationConfiguration
 │       │   └── resources/
 │       │       ├── application.properties
@@ -56,6 +59,7 @@ local-delivery/
 │       └── test/java/com/localdelivery/
 │           ├── DeliveryApiTest.java
 │           ├── AcceptRequestApiTest.java
+│           ├── UpdateStatusApiTest.java
 │           ├── LegacyMigrationTest.java
 │           ├── ApiErrorTest.java
 │           ├── WorkflowDtoValidationTest.java
@@ -97,7 +101,9 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
 npm run dev
 ```
 
-Open [the frontend](http://localhost:3000), [API health](http://localhost:8080/api/health), and [Swagger UI](http://localhost:8080/docs).
+Open [the frontend](http://localhost:3000), [API health](http://127.0.0.1:8080/api/health), and [Swagger UI](http://127.0.0.1:8080/docs).
+
+The backend binds to IPv4 `127.0.0.1`. Use that address explicitly: on this machine an unrelated Docker service answers IPv6 `localhost:8080`, which can send a browser or terminal request to the wrong application.
 
 If the servers are already running, use them directly. Stop a server with Ctrl+C before restarting. `docker compose stop db` stops this project's database while preserving its volume.
 
@@ -141,7 +147,7 @@ For an external PostgreSQL installation, create the configured database and role
 | JSON `customer_id`, `helper_reward`, etc. | JSON `customerId`, `helperReward`, etc. |
 | FastAPI error `detail` | Consistent `timestamp`, `status`, `error`, `message`, `fields` |
 
-Old URLs and snake_case request bodies are not compatibility aliases. Refresh old Swagger tabs using the new [documentation URL](http://localhost:8080/docs). OpenAPI JSON is at `/api/openapi.json`.
+Old URLs and snake_case request bodies are not compatibility aliases. Refresh old Swagger tabs using the new [documentation URL](http://127.0.0.1:8080/docs). OpenAPI JSON is at `/api/openapi.json`.
 
 | Endpoint | Behavior |
 | --- | --- |
@@ -150,6 +156,7 @@ Old URLs and snake_case request bodies are not compatibility aliases. Refresh ol
 | `GET /api/requests` | 200, array of OPEN requests, newest first; descending ID breaks timestamp ties |
 | `GET /api/requests/{id}` | 200, complete request regardless of status; 404 if missing |
 | `POST /api/requests/{id}/accept` | 200, complete accepted request with the chosen helper; 409 if no longer available |
+| `PATCH /api/requests/{id}/status` | 200, complete updated request; 409 for invalid transitions or concurrent changes |
 
 Validation preserves the existing behavior:
 
@@ -159,7 +166,7 @@ Validation preserves the existing behavior:
 - Title, description, and addresses must contain text. Surrounding whitespace is stripped. Titles allow 200 characters and addresses allow 500.
 - Amounts are nonnegative with up to eight integer digits and two decimal places. Zero reward is allowed. Response amounts are JSON strings for decimal precision.
 - Deadlines must be in the future. An explicit timezone offset is preferred; a timestamp without one is interpreted in Europe/Oslo. Ambiguous/nonexistent local times during daylight-saving changes require an explicit offset. Responses use UTC (`Z`).
-- Unknown fields, including client-supplied IDs, helper assignments, and status, are rejected.
+- Unknown fields are rejected. Creation rejects client-supplied IDs, helper assignments, and status. Acceptance accepts only `helperId`; status updates accept only `status`.
 
 Invalid bodies or path IDs return 422. Database constraint conflicts return 409. Temporary database connection failures return 503 without exposing database exception details. Missing resources return 404. Failed service transactions roll back.
 
@@ -184,7 +191,7 @@ public record UpdateStatusRequest(@NotNull DeliveryStatus status) {}
 
 `ApiExceptionHandler` already provides centralized validation errors. Missing or invalid constrained fields return 422 with field details. Malformed JSON, unknown enum names, numeric enums, incorrect JSON types, and extra fields return 422 with a safe error message. The new tests exercise these DTOs through isolated MockMvc controllers with the application's Jackson configuration and error handler.
 
-The test controllers live only in test sources and are excluded from application component scanning. They are not available on the running server. Stage 5 only validates input shape and values. Stage 8 now exposes the acceptance DTO in Swagger and enforces helper existence, self-acceptance, and concurrency rules. The status-update route and transition rules remain for Stage 9.
+The test controllers live only in test sources and are excluded from application component scanning. They are not available on the running server. Stage 5 only validates input shape and values. Stage 8 exposes the acceptance DTO in Swagger and enforces helper existence, self-acceptance, and concurrency rules. Stage 9 exposes the status-update DTO and enforces transition rules.
 
 To verify this stage independently, run:
 
@@ -193,7 +200,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=WorkflowDtoValidationTest test
 ```
 
-Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that the future status-update route and test-only routes are absent from OpenAPI.
+Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that implemented routes appear in OpenAPI while test-only routes remain absent.
 
 ## Stage 6 creation API verification
 
@@ -217,7 +224,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=DeliveryApiTest test
 ```
 
-The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 155 cases, including the separate acceptance suite.
+The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 220 cases, including the separate acceptance and status-update suites.
 
 ## Stage 7 listing and detail verification
 
@@ -241,11 +248,11 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 
 Manual Stage 7 checks require no data changes:
 
-1. Open [the available requests](http://localhost:8080/api/requests). Expect HTTP 200, OPEN statuses only, and descending creation time/ID.
-2. Open [request 4](http://localhost:8080/api/requests/4), the Stage 6 verification record. Expect HTTP 200 and the same complete fields as its list entry. On a fresh database, use the ID of a request you created.
-3. Open [a missing request](http://localhost:8080/api/requests/9223372036854775807). Expect HTTP 404 and `Delivery request not found.`
-4. Open [an invalid request ID](http://localhost:8080/api/requests/abc). Expect HTTP 422.
-5. In [Swagger UI](http://localhost:8080/docs), expand either GET request operation and select **Try it out → Execute**. The list needs no parameters; details require an existing ID.
+1. Open [the available requests](http://127.0.0.1:8080/api/requests). Expect HTTP 200, OPEN statuses only, and descending creation time/ID.
+2. Open [request 4](http://127.0.0.1:8080/api/requests/4), the Stage 6 verification record. Expect HTTP 200 and the same complete fields as its list entry. On a fresh database, use the ID of a request you created.
+3. Open [a missing request](http://127.0.0.1:8080/api/requests/9223372036854775807). Expect HTTP 404 and `Delivery request not found.`
+4. Open [an invalid request ID](http://127.0.0.1:8080/api/requests/abc). Expect HTTP 422.
+5. In [Swagger UI](http://127.0.0.1:8080/docs), expand either GET request operation and select **Try it out → Execute**. The list needs no parameters; details require an existing ID.
 
 Mixed-status filtering and empty-list behavior are verified in isolated test schemas; no development request needs to be edited to test them.
 
@@ -283,7 +290,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 
 Manual checks on the running app:
 
-1. Refresh [Swagger UI](http://localhost:8080/docs). Create a new request using customer 1 and the sample in the next section. Note its returned ID.
+1. Refresh [Swagger UI](http://127.0.0.1:8080/docs). Create a new request using customer 1 and the sample in the next section. Note its returned ID.
 2. Expand **POST /api/requests/{id}/accept**, select **Try it out**, enter that ID, and submit `{"helperId":1}`. Expect 400; the customer cannot accept their own request.
 3. Submit `{"helperId":9223372036854775807}`. Expect 404 for the missing helper; the request remains OPEN.
 4. Submit `{"helperId":2}`. Expect 200, `helperId: 2`, and `status: "ACCEPTED"`.
@@ -294,16 +301,71 @@ Manual checks on the running app:
 For terminal testing, replace `REQUEST_ID` with the newly created ID:
 
 ```bash
-curl -i -X POST http://localhost:8080/api/requests/REQUEST_ID/accept \
+curl -i -X POST http://127.0.0.1:8080/api/requests/REQUEST_ID/accept \
   -H 'Content-Type: application/json' \
   -d '{"helperId":2}'
 ```
 
-The live verification created and accepted request **6**, titled **Stage 8 verification — acceptance**. It remains available at [request 6](http://localhost:8080/api/requests/6). Use a newly created OPEN request to repeat the successful acceptance step.
+The live verification created and accepted request **6**, titled **Stage 8 verification — acceptance**. It remains available at [request 6](http://127.0.0.1:8080/api/requests/6). Use a newly created OPEN request to repeat the successful acceptance step.
+
+## Stage 9 — delivery status updates
+
+`PATCH /api/requests/{id}/status` accepts only a status:
+
+```json
+{"status": "PICKED_UP"}
+```
+
+The domain enum `DeliveryStatus.canTransitionTo` defines the entire transition graph, shared by acceptance and status updates. The controller validates the ID and `UpdateStatusRequest`, then delegates to the transactional service. The service checks the transition, saves with optimistic locking, refreshes stored values, and returns the complete DTO with HTTP 200.
+
+| Current status | Allowed next status | Endpoint |
+| --- | --- | --- |
+| OPEN | ACCEPTED | `POST /api/requests/{id}/accept`, with a valid helper |
+| OPEN | CANCELLED | `PATCH /api/requests/{id}/status` |
+| ACCEPTED | PICKED_UP or CANCELLED | `PATCH /api/requests/{id}/status` |
+| PICKED_UP | DELIVERING | `PATCH /api/requests/{id}/status` |
+| DELIVERING | DELIVERED | `PATCH /api/requests/{id}/status` |
+| DELIVERED or CANCELLED | None | Terminal states |
+
+Cancellation is permitted only before pickup. Cancelling an accepted request retains its helper assignment for history; cancelling an OPEN request leaves its helper null. Status PATCH cannot accept an OPEN request: it returns 409 directing the caller to the acceptance endpoint so helper validation and assignment cannot be bypassed. Legacy records without an assigned helper cannot advance through delivery statuses. Authentication and caller authorization remain scheduled for Stage 20.
+
+Repeated statuses, skipped steps, backward transitions, cancellation after pickup, and any update to a terminal request return 409. Missing requests return 404; missing/null/unknown statuses, malformed bodies, extra fields, and invalid IDs return 422. Failed updates leave every saved field, timestamp, and version unchanged.
+
+A successful update changes only `status`, `updatedAt`, and the internal optimistic-lock version. Customer, helper, details, amounts, deadline, and `createdAt` are preserved. The response exactly matches a subsequent GET. No new database migration is needed; the existing V3 `version` column protects status updates and acceptance in the same way.
+
+Run the 65 status cases with PostgreSQL running:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw -Dtest=UpdateStatusApiTest test
+```
+
+These cover all 36 status pairs, the complete creation/acceptance/delivery flow for all categories, invalid input, missing requests, unassigned legacy records, and concurrent updates. Two deterministic races load the same PostgreSQL row version before either write: cancellation versus acceptance, and cancellation versus pickup. Exactly one transaction commits. Simultaneous HTTP pickup calls likewise return one 200 and one 409.
+
+Manual testing in [Swagger UI](http://127.0.0.1:8080/docs):
+
+1. Refresh the page. Create a **new** request with customer 1 using the JSON below; note the returned ID.
+2. PATCH that ID with `{"status":"ACCEPTED"}`. Expect 409 instructing you to use the acceptance endpoint; GET still shows OPEN and a null helper.
+3. POST `/api/requests/{id}/accept` with `{"helperId":2}`. Expect 200 and ACCEPTED.
+4. PATCH with `{"status":"DELIVERED"}`. Expect 409; GET still shows ACCEPTED.
+5. PATCH sequentially with `{"status":"PICKED_UP"}`, `{"status":"DELIVERING"}`, and `{"status":"DELIVERED"}`. Each returns 200 and the requested status. GET after each step must match the PATCH response; helper 2 and the original `createdAt` remain unchanged.
+6. PATCH the delivered request with `{"status":"DELIVERING"}` or `{"status":"CANCELLED"}`. Both return 409 and leave it DELIVERED. It remains absent from the OPEN listing.
+7. PATCH with `{}`, `{"status":"UNKNOWN"}`, or `{"status":1}`. Expect 422. PATCH a missing ID such as `9223372036854775807` with `{"status":"PICKED_UP"}` and expect 404.
+8. To test cancellation, create another new request and PATCH it with `{"status":"CANCELLED"}`. Expect 200, CANCELLED, and a null helper. Further updates return 409. Repeat with another request after accepting it to confirm helper 2 is retained on cancellation.
+
+Terminal equivalent for each valid status change (replace `REQUEST_ID` with the new accepted request's ID, then change the status in order):
+
+```bash
+curl -i -X PATCH http://127.0.0.1:8080/api/requests/REQUEST_ID/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"PICKED_UP"}'
+```
+
+Live verification samples are available as [request 8: DELIVERED](http://127.0.0.1:8080/api/requests/8), [request 9: cancelled before acceptance](http://127.0.0.1:8080/api/requests/9), and [request 10: cancelled before pickup](http://127.0.0.1:8080/api/requests/10). Create a new request to repeat the successful transitions; these samples are terminal.
 
 ## Manual creation and viewing tests
 
-1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://localhost:8080/docs).
+1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://127.0.0.1:8080/docs).
 2. Expand `GET /api/health`, select **Try it out → Execute**, and expect 200 with `{"status":"ok"}`.
 3. Expand `POST /api/requests`, select **Try it out**, and paste the following JSON. Change the deadline if testing after the example date.
 
@@ -330,10 +392,10 @@ The live verification created and accepted request **6**, titled **Stage 8 verif
 Read-only terminal checks:
 
 ```bash
-curl -i http://localhost:8080/api/health
-curl -i http://localhost:8080/api/requests
-curl -i http://localhost:8080/api/requests/1
-curl -i http://localhost:8080/api/requests/9223372036854775807
+curl -i http://127.0.0.1:8080/api/health
+curl -i http://127.0.0.1:8080/api/requests
+curl -i http://127.0.0.1:8080/api/requests/1
+curl -i http://127.0.0.1:8080/api/requests/9223372036854775807
 ```
 
 ## Data model and migration
@@ -365,7 +427,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 155 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, safe errors, populated legacy-schema migration through V3, and the full acceptance workflow including real concurrent transactions.
+The 220 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, safe errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -387,6 +449,8 @@ The updated JAR was built and started on port 8080. Live verification returned 2
 Stage 7 verification on 2026-10-06 passed all 120 tests. The running application returned requests 5, 4, 2, and 1 in newest-first order, with each detail response matching its complete list entry. Missing IDs returned 404 and invalid IDs returned 422. Database snapshots before and after the live checks confirmed that every saved user and request was unchanged. No application-code change or restart was needed.
 
 Stage 8 verification on 2026-10-06 passed all 155 tests with no failures or skips. The JAR was built and restarted, Flyway V3 applied successfully, and all existing records matched the saved backup. Live acceptance returned 200 for helper 2, removed request 6 from OPEN jobs, and persisted version 1. Missing resources returned 404, self-acceptance returned 400, invalid helper input returned 422, and repeated acceptance returned 409. Previous requests were unchanged.
+
+Stage 9 verification on 2026-10-18 passed all 220 backend tests with no failures or skips, including 65 status cases. The first attempt found Docker stopped; after starting the existing PostgreSQL container, the complete suite passed. The updated JAR was packaged and started on port 8080. Health, Swagger UI, and OpenAPI returned 200. New request 8 completed acceptance, pickup, delivery, and completion with version 4; requests 9 and 10 exercised both cancellation paths with versions 1 and 2. Live checks confirmed 409 for invalid transitions, 404 for a missing request, and 422 for invalid input. Database snapshots confirmed all two preexisting users and six requests remained unchanged. Flyway remained at V3, with no schema migration required.
 
 ## Important implementation examples
 
@@ -431,6 +495,22 @@ entityManager.refresh(saved);
 return DeliveryRequestResponse.from(saved);
 ```
 
+The central domain rule includes both acceptance and status changes:
+
+```java
+public boolean canTransitionTo(DeliveryStatus next) {
+    return switch (this) {
+        case OPEN -> next == ACCEPTED || next == CANCELLED;
+        case ACCEPTED -> next == PICKED_UP || next == CANCELLED;
+        case PICKED_UP -> next == DELIVERING;
+        case DELIVERING -> next == DELIVERED;
+        case DELIVERED, CANCELLED -> false;
+    };
+}
+```
+
+`DeliveryRequestService.updateStatus` additionally requires the dedicated acceptance operation for ACCEPTED and an assigned helper for delivery progress. It saves and refreshes within a transaction, just like acceptance.
+
 ## Files changed and Git
 
 This migration adds the Maven wrapper/build, Java packages, properties, Flyway scripts, and Java tests listed above. It removes the Python app, Python tests, requirements, and Alembic configuration/scripts. It updates `.env.example`, `.gitignore`, `compose.yaml`, and this README. Frontend source and existing credentials are unchanged.
@@ -443,12 +523,14 @@ Stage 7 review changes `DeliveryApiTest.java`, `ApiErrorTest.java`, and this REA
 
 Stage 8 creates `RequestNotOpenException.java`, `SelfAcceptanceException.java`, `V3__request_optimistic_locking.sql`, and `AcceptRequestApiTest.java`. It updates `DeliveryRequestController.java`, `DeliveryRequestService.java`, `DeliveryRequest.java`, `ApiExceptionHandler.java`, `DeliveryApiTest.java`, `ApiErrorTest.java`, `LegacyMigrationTest.java`, and this README. The earlier uncommitted Stage 7 test/documentation changes are retained.
 
+Stage 9 creates `InvalidStatusTransitionException.java` and `UpdateStatusApiTest.java`. It updates `DeliveryStatus.java`, `DeliveryRequestController.java`, `DeliveryRequestService.java`, `ApiExceptionHandler.java`, `DeliveryApiTest.java`, `ApiErrorTest.java`, and this README. The existing `UpdateStatusRequest` DTO is reused. There are no schema or frontend changes.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add delivery request acceptance workflow
+feat: add delivery status transitions
 ```
 
-Stop here. Stage 9 will add delivery-status updates and valid transition rules when requested.
+Stop here. Stage 10's broader error-handling review will begin only when requested.

@@ -3,6 +3,8 @@ package com.localdelivery.service;
 import com.localdelivery.dto.CreateDeliveryRequestRequest;
 import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
+import com.localdelivery.dto.UpdateStatusRequest;
+import com.localdelivery.exception.InvalidStatusTransitionException;
 import com.localdelivery.exception.ResourceNotFoundException;
 import com.localdelivery.exception.RequestNotOpenException;
 import com.localdelivery.exception.SelfAcceptanceException;
@@ -60,7 +62,7 @@ public class DeliveryRequestService {
     public DeliveryRequestResponse accept(Long id, AcceptRequestDto input) {
         var request = requests.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
-        if (request.getStatus() != DeliveryStatus.OPEN || request.getHelper() != null) {
+        if (!request.getStatus().canTransitionTo(DeliveryStatus.ACCEPTED) || request.getHelper() != null) {
             throw new RequestNotOpenException();
         }
         var helper = users.findById(input.helperId())
@@ -71,6 +73,28 @@ public class DeliveryRequestService {
         request.setHelper(helper);
         request.setStatus(DeliveryStatus.ACCEPTED);
         // Flush checks @Version before returning; a competing update rolls this transaction back.
+        var saved = requests.saveAndFlush(request);
+        entityManager.refresh(saved);
+        return DeliveryRequestResponse.from(saved);
+    }
+
+    @Transactional
+    public DeliveryRequestResponse updateStatus(Long id, UpdateStatusRequest input) {
+        var request = requests.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
+        var next = input.status();
+        if (!request.getStatus().canTransitionTo(next)) {
+            throw new InvalidStatusTransitionException(request.getStatus(), next);
+        }
+        // Acceptance must assign and validate a helper through the dedicated endpoint.
+        if (next == DeliveryStatus.ACCEPTED) {
+            throw new InvalidStatusTransitionException(
+                    "Use POST /api/requests/{id}/accept to assign a helper and accept this request.");
+        }
+        if (next != DeliveryStatus.CANCELLED && request.getHelper() == null) {
+            throw new InvalidStatusTransitionException("Delivery request has no assigned helper.");
+        }
+        request.setStatus(next);
         var saved = requests.saveAndFlush(request);
         entityManager.refresh(saved);
         return DeliveryRequestResponse.from(saved);
