@@ -1,6 +1,6 @@
-# Local Delivery — Stage 10 centralized error handling complete
+# Local Delivery — Stage 11 frontend structure complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, and Maven. Health checks, PostgreSQL models, demo users, validation, create/list/detail APIs, job acceptance, delivery-status updates, and centralized error handling are complete through Stage 10 of the Java plan. Stage 11 frontend setup is next and has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Backend features through Stage 10 and Stage 11's frontend navigation, page shells, API configuration, and reusable API helper are complete. Stage 12's request form is next and has not been started.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -14,7 +14,7 @@ Stage 9 adds the status PATCH endpoint and centralized transitions through picku
 
 Stage 10 adds an explicit already-accepted exception and a consistent JSON error contract for business errors, validation, Spring MVC request errors, and unexpected server failures. Protocol headers and field validation details are preserved; internal exception details stay out of responses.
 
-The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
+Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. The four feature pages clearly say “Coming soon”; forms, job listings, and tracking functionality remain for their respective later stages. Authentication, payments, GPS, and chat also remain out of scope.
 
 ## Stack and architecture
 
@@ -68,14 +68,27 @@ local-delivery/
 │           ├── ApiErrorContractTest.java
 │           ├── WorkflowDtoValidationTest.java
 │           └── PostgresTestDatabase.java
-└── frontend/  Existing Next.js application
+└── frontend/
+    ├── .env.example
+    ├── next.config.mjs
+    ├── package.json / package-lock.json
+    ├── src/
+    │   ├── app/
+    │   │   ├── layout.tsx / globals.css / page.tsx
+    │   │   ├── requests/new/page.tsx
+    │   │   ├── jobs/page.tsx
+    │   │   ├── my-requests/page.tsx
+    │   │   └── my-deliveries/page.tsx
+    │   ├── components/  navigation.tsx, page-shell.tsx
+    │   └── lib/         api.ts, api-config.mjs
+    └── tests/           api.test.mjs, home.test.mjs
 ```
 
 ## Prerequisites
 
 - JDK 21, with `java` on PATH (`java -version`).
 - PostgreSQL available locally. This checkout retains its existing Docker Compose database; Docker Desktop must be running to use it. An independently installed PostgreSQL database also works.
-- Node.js 20.9+ and npm for the frontend.
+- Node.js 22.17+ and npm for the frontend. Tests use Node's built-in TypeScript stripping to test the actual API helper without adding a test-runner dependency.
 - Free ports 8080 (backend), 3000 (frontend), and 5433 (this checkout's PostgreSQL).
 
 No global Maven installation is needed. The wrapper downloads Maven and dependencies on first use. On Windows, use `mvnw.cmd` instead of `./mvnw`.
@@ -100,12 +113,14 @@ Flyway applies migrations at startup, Hibernate validates the schema, and the `d
 
 Start the frontend in another terminal:
 
+For a fresh checkout, first copy `frontend/.env.example` to `frontend/.env.local`. This machine already has that local file. Preserve it if it exists.
+
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
 npm run dev
 ```
 
-Open [the frontend](http://localhost:3000), [API health](http://127.0.0.1:8080/api/health), and [Swagger UI](http://127.0.0.1:8080/docs).
+Open [the frontend](http://127.0.0.1:3000), [API health](http://127.0.0.1:8080/api/health), and [Swagger UI](http://127.0.0.1:8080/docs).
 
 The backend binds to IPv4 `127.0.0.1`. Use that address explicitly: on this machine an unrelated Docker service answers IPv6 `localhost:8080`, which can send a browser or terminal request to the wrong application.
 
@@ -121,7 +136,7 @@ java -jar target/local-delivery-0.1.0.jar --spring.profiles.active=dev
 
 ## First-time setup and environment variables
 
-For a new checkout, copy `.env.example` to `.env` at the project root and fill in `DB_PASSWORD` before starting the database. Preserve the existing `.env` when upgrading. Run `npm ci` from `frontend` once, then follow the commands above using your own checkout path.
+For a new checkout, copy `.env.example` to `.env` at the project root and fill in `DB_PASSWORD` before starting the database. Preserve the existing `.env` when upgrading. Run `npm ci` from `frontend` once and copy its `.env.example` to `.env.local`, then follow the commands above using your own checkout path.
 
 | Variable | Default / purpose |
 | --- | --- |
@@ -132,6 +147,7 @@ For a new checkout, copy `.env.example` to `.env` at the project root and fill i
 | `DB_PASSWORD` | Required; no password is hardcoded |
 | `SERVER_PORT` | `8080` |
 | `SEED_DEMO_USERS` | `false` outside the dev profile; dev enables seeding |
+| `NEXT_PUBLIC_API_URL` | Set in `frontend/.env.local`; example `http://127.0.0.1:8080/api`, including `/api` |
 
 Spring loads the root `.env` when started from `backend`, treating it as Java properties. Use unquoted values. Exported environment variables override file values for the same key. The old `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` names remain supported so the existing installation needs no secret changes; prefer the new `DB_*` keys and avoid defining both families at once.
 
@@ -441,6 +457,80 @@ curl -i -H 'Accept: application/xml' http://127.0.0.1:8080/api/requests
 
 Expect 404, 405, 415, and 406 respectively. The 405 response includes `Allow`; the 415 response includes `Accept`. On a fresh database, create and accept a request for step 4, and complete delivery for step 5 using the preceding stages. The 500 and 503 branches are verified with injected failures in isolated tests; no failure-injection endpoint is added to the running application.
 
+## Stage 11 — frontend navigation and API setup
+
+The application now has five routes:
+
+| Page | Route | Current behavior |
+| --- | --- | --- |
+| Home | `/` | Introduction and links to create a request or view jobs |
+| Create Request | `/requests/new` | Page shell; request form comes in Stage 12 |
+| Available Jobs | `/jobs` | Page shell; live job listing comes in Stage 13 |
+| My Requests | `/my-requests` | Page shell; customer tracking comes in Stage 15 |
+| My Deliveries | `/my-deliveries` | Page shell; helper workflow comes in Stage 16 |
+
+All pages share the root layout, header, navigation, and footer. Navigation uses Next.js `Link` and `usePathname`, with `aria-current="page"` on the active item. Links wrap on narrow screens; keyboard users can skip directly to the main content. Each feature page has its own document title and a clear availability notice. No request form, simulated job data, or working delivery controls are added in this stage.
+
+Configure the backend once in `frontend/.env.local`:
+
+```dotenv
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8080/api
+```
+
+This is public configuration, so never put secrets in `NEXT_PUBLIC_*` variables. `api-config.mjs` validates the URL and removes trailing slashes. Missing or invalid configuration produces an explicit setup error. Restart the development server after changing it; rebuild the production frontend before using a different backend URL.
+
+`src/lib/api.ts` exports the generic `apiRequest<T>()` helper and `ApiError`. Callers pass paths relative to the configured API root:
+
+```ts
+import { apiRequest, ApiError } from "./lib/api"; // Adjust the import to your file.
+
+const health = await apiRequest<{ status: string }>("/health");
+
+try {
+  await apiRequest("/requests/9223372036854775807");
+} catch (error) {
+  if (error instanceof ApiError) {
+    console.log(error.status, error.message, error.fields);
+  }
+}
+```
+
+The helper serializes JSON bodies, sets JSON headers, disables caching by default, uses a ten-second timeout unless the caller supplies an abort signal, and returns parsed JSON. Empty successful responses return `undefined`. Failed HTTP responses throw `ApiError`, preserving the backend message, HTTP status, and field-validation messages. Non-JSON failures receive a safe fallback message. Transport failures and cancellation propagate to the caller.
+
+Server calls use the configured backend URL directly. Browser calls use the same-origin `/backend-api` prefix; `next.config.mjs` rewrites that prefix to the configured backend `/api` root. This lets later client forms reuse the helper without adding CORS permissions to the Java backend. Backend URLs are kept out of page components. The proxy forwards methods and request bodies, including the backend's existing error responses.
+
+For example, the shared request code chooses its base in one place:
+
+```ts
+const baseUrl = typeof window === "undefined" ? getApiBaseUrl() : API_PROXY_PATH;
+```
+
+Verify the frontend from its directory:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run build
+```
+
+To test the production build, stop any running frontend, run `npm run start`, and run `npm test` in another terminal with the Java backend also running. Use `npm run dev` when editing the frontend; do not run both servers on port 3000 at once. `npm test` includes 24 isolated API/configuration cases and eight live checks covering all five pages, navigation, active links, page titles, direct backend access, proxy health, and validation error forwarding. `FRONTEND_TEST_URL` can override the test frontend address. Unit tests do not require either server.
+
+Manual testing:
+
+1. Open [Home](http://127.0.0.1:3000/). Click each of the five navigation links. Confirm its heading, document title, and active underline change.
+2. Refresh each route directly. All should load successfully with the same navigation. The four feature pages should display “Coming soon”.
+3. On Home, click **Create a request** and **View available jobs**; confirm they reach `/requests/new` and `/jobs` respectively. Use **Back to home** to return from a feature page.
+4. Use Tab to focus **Skip to content**, then Enter. Focus should move to the main content. At a narrow mobile width, confirm navigation wraps and buttons remain usable without horizontal scrolling.
+5. Open [proxied health](http://127.0.0.1:3000/backend-api/health). Expect `{"status":"ok"}` from the Java backend.
+6. Run the following command. Expect HTTP 422 with `Validation failed.` and field errors; no request is created:
+
+```bash
+curl -i -X POST http://127.0.0.1:3000/backend-api/requests \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
 ## Manual creation and viewing tests
 
 1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://127.0.0.1:8080/docs).
@@ -509,7 +599,7 @@ The 250 tests cover health, creation in all categories, all Stage 5 DTOs and fie
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
-With the frontend development server running:
+With the frontend and Java backend running:
 
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/frontend
@@ -531,6 +621,8 @@ Stage 8 verification on 2026-10-06 passed all 155 tests with no failures or skip
 Stage 9 verification on 2026-10-18 passed all 220 backend tests with no failures or skips, including 65 status cases. The first attempt found Docker stopped; after starting the existing PostgreSQL container, the complete suite passed. The updated JAR was packaged and started on port 8080. Health, Swagger UI, and OpenAPI returned 200. New request 8 completed acceptance, pickup, delivery, and completion with version 4; requests 9 and 10 exercised both cancellation paths with versions 1 and 2. Live checks confirmed 409 for invalid transitions, 404 for a missing request, and 422 for invalid input. Database snapshots confirmed all two preexisting users and six requests remained unchanged. Flyway remained at V3, with no schema migration required.
 
 Stage 10 completion on 2026-10-19 verified a successful full run of 250 tests with zero failures, errors, or skips. The executable JAR was packaged and started, with health, Swagger UI, and OpenAPI returning 200. Eighteen live error checks verified consistent JSON for 400, 404, 405, 406, 409, 415, and 422 responses, including field errors and protocol headers. All two existing users and nine requests matched their database snapshot exactly, including timestamps and versions. No development records were created or changed. The schema remains at V3.
+
+Stage 11 verification on 2026-10-19 passed frontend lint, TypeScript checking, the production build, all 32 frontend tests, and all 250 backend regression tests. The production frontend is running on `127.0.0.1:3000`. Browser checks exercised every navigation link, active-link updates, page content, keyboard skip navigation, and the Home/My Deliveries layouts at 390px width with no horizontal overflow. Browser logs showed no warnings or errors during these checks. Live API checks verified direct and proxied health, a missing-request error, and a proxied validation error. No successful mutation was sent to development data. Stage 12 remains unstarted.
 
 ## Important implementation examples
 
@@ -607,12 +699,14 @@ Stage 9 creates `InvalidStatusTransitionException.java` and `UpdateStatusApiTest
 
 Stage 10 creates `RequestAlreadyAcceptedException.java` and `ApiErrorContractTest.java`. It updates `ApiExceptionHandler.java`, `DeliveryRequestService.java`, `AcceptRequestApiTest.java`, and this README. It reuses the existing error DTO and adds no dependency, schema migration, or frontend changes.
 
+Stage 11 creates `frontend/.env.example`, `frontend/next.config.mjs`, the four feature page files, `navigation.tsx`, `page-shell.tsx`, `api-config.mjs`, `api.ts`, and `tests/api.test.mjs`. It updates the root layout, homepage, global CSS, `tests/home.test.mjs`, frontend package/lock files, and this README. Node 22.17+ is declared for native TypeScript tests; no package dependency is added. Local `frontend/.env.local` is created from the template and remains ignored. Java source and database schema are unchanged.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add centralized API error handling
+feat: add initial frontend structure
 ```
 
-Stop here. Stage 11 frontend setup will begin only when requested.
+Stop here. Stage 12's request creation form will begin only when requested.

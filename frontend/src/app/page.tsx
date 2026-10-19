@@ -1,24 +1,27 @@
+import Link from "next/link";
+
 export default function HomePage() {
-  return (
-    <main className="welcome">
-      <div className="location">Oslo, Norway</div>
-      <p className="eyebrow">A little help, close to home.</p>
-      <h1>Local Delivery</h1>
-      <p className="intro">
-        Everyday errands. Neighbourly help. A simpler way to get things from
-        here to there.
-      </p>
-      <div className="project-note">
-        <span className="stage">01</span>
-        <div>
-          <h2>The foundation is in place.</h2>
-          <p>
-            This is the project setup page. Delivery requests and local jobs
-            will arrive in a later stage.
-          </p>
-        </div>
-      </div>
-      <footer>Small deliveries. A more connected neighbourhood.</footer>
-    </main>
-  );
+	return (
+		<>
+			<p className="eyebrow">A little help, close to home.</p>
+			<h1>
+				What do you need
+				<br />
+				help with?
+			</h1>
+			<p className="intro">
+				A package across town. Groceries on your doorstep. An extra pair of
+				hands, right here in Oslo.
+			</p>
+			<div className="home-actions">
+				<Link className="button" href="/requests/new">
+					Create a request <span aria-hidden="true">↗</span>
+				</Link>
+				<Link className="button secondary" href="/jobs">
+					View available jobs <span aria-hidden="true">↗</span>
+				</Link>
+			</div>
+			<p className="home-note">Local errands. Neighbourly help.</p>
+		</>
+	);
 }
