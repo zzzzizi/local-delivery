@@ -5,20 +5,25 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.http.HttpHeaders;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 @RestControllerAdvice
-public class ApiExceptionHandler {
+public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public record ApiError(OffsetDateTime timestamp, int status, String error,
                            String message, Map<String, String> fields) {}
 
@@ -27,17 +32,19 @@ public class ApiExceptionHandler {
         return response(HttpStatus.NOT_FOUND, error.getMessage(), Map.of());
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    ResponseEntity<ApiError> validation(MethodArgumentNotValidException error) {
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException error,
+            HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         Map<String, String> fields = new LinkedHashMap<>();
         error.getBindingResult().getFieldErrors().forEach(
                 item -> fields.putIfAbsent(item.getField(), item.getDefaultMessage()));
-        return response(HttpStatus.UNPROCESSABLE_ENTITY, "Validation failed.", fields);
+        return super.handleExceptionInternal(error,
+                errorBody(HttpStatus.UNPROCESSABLE_ENTITY, "Validation failed.", fields),
+                jsonHeaders(headers), HttpStatus.UNPROCESSABLE_ENTITY, request);
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class,
-            ConstraintViolationException.class})
-    ResponseEntity<ApiError> invalidInput(Exception error) {
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ApiError> invalidInput() {
         return response(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid request body or parameter.", Map.of());
     }
 
@@ -48,6 +55,11 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(RequestNotOpenException.class)
     ResponseEntity<ApiError> notOpen(RequestNotOpenException error) {
+        return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(RequestAlreadyAcceptedException.class)
+    ResponseEntity<ApiError> alreadyAccepted(RequestAlreadyAcceptedException error) {
         return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
     }
 
@@ -72,8 +84,51 @@ public class ApiExceptionHandler {
         return response(HttpStatus.SERVICE_UNAVAILABLE, "Database temporarily unavailable. Try again later.", Map.of());
     }
 
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<ApiError> unexpected(Exception error) {
+        logger.error("Unexpected API failure.", error);
+        return response(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected server error occurred.", Map.of());
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleExceptionInternal(Exception error, Object body, HttpHeaders headers,
+            HttpStatusCode status, WebRequest request) {
+        String message;
+        if (error instanceof HttpMessageNotReadableException || error instanceof MethodArgumentTypeMismatchException) {
+            status = HttpStatus.UNPROCESSABLE_ENTITY;
+            message = "Invalid request body or parameter.";
+        } else if (status.is5xxServerError()) {
+            logger.error("API request processing failed.", error);
+            message = "An unexpected server error occurred.";
+        } else {
+            // Keep Spring's status and protocol headers, but never expose its exception details.
+            message = switch (status.value()) {
+                case 404 -> "Endpoint not found.";
+                case 405 -> "HTTP method not allowed for this endpoint.";
+                case 406 -> "Requested response format is not supported.";
+                case 415 -> "Unsupported request content type. Use application/json.";
+                default -> "Invalid HTTP request.";
+            };
+        }
+        return super.handleExceptionInternal(error, errorBody(status, message, Map.of()),
+                jsonHeaders(headers), status, request);
+    }
+
+    private static HttpHeaders jsonHeaders(HttpHeaders original) {
+        var headers = new HttpHeaders();
+        headers.putAll(original);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
+
     private ResponseEntity<ApiError> response(HttpStatus status, String message, Map<String, String> fields) {
-        return ResponseEntity.status(status).body(new ApiError(
-                OffsetDateTime.now(ZoneOffset.UTC), status.value(), status.getReasonPhrase(), message, fields));
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
+                .body(errorBody(status, message, fields));
+    }
+
+    private ApiError errorBody(HttpStatusCode status, String message, Map<String, String> fields) {
+        var knownStatus = HttpStatus.resolve(status.value());
+        return new ApiError(OffsetDateTime.now(ZoneOffset.UTC), status.value(),
+                knownStatus == null ? "Error" : knownStatus.getReasonPhrase(), message, fields);
     }
 }

@@ -5,6 +5,7 @@ import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
 import com.localdelivery.dto.UpdateStatusRequest;
 import com.localdelivery.exception.InvalidStatusTransitionException;
+import com.localdelivery.exception.RequestAlreadyAcceptedException;
 import com.localdelivery.exception.ResourceNotFoundException;
 import com.localdelivery.exception.RequestNotOpenException;
 import com.localdelivery.exception.SelfAcceptanceException;
@@ -62,7 +63,10 @@ public class DeliveryRequestService {
     public DeliveryRequestResponse accept(Long id, AcceptRequestDto input) {
         var request = requests.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
-        if (!request.getStatus().canTransitionTo(DeliveryStatus.ACCEPTED) || request.getHelper() != null) {
+        if (request.getHelper() != null || request.getStatus() == DeliveryStatus.ACCEPTED) {
+            throw new RequestAlreadyAcceptedException();
+        }
+        if (!request.getStatus().canTransitionTo(DeliveryStatus.ACCEPTED)) {
             throw new RequestNotOpenException();
         }
         var helper = users.findById(input.helperId())

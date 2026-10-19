@@ -1,6 +1,6 @@
-# Local Delivery — Stage 9 delivery status API complete
+# Local Delivery — Stage 10 centralized error handling complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, and Maven. Health checks, PostgreSQL models, demo users, validation, create/list/detail APIs, job acceptance, and delivery-status updates are complete through Stage 9 of the Java plan. Stage 10's broader error-handling review is next.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, and Maven. Health checks, PostgreSQL models, demo users, validation, create/list/detail APIs, job acceptance, delivery-status updates, and centralized error handling are complete through Stage 10 of the Java plan. Stage 11 frontend setup is next and has not been started.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -11,6 +11,8 @@ Stage 7 is also reviewed and complete. Listing returns OPEN requests newest firs
 Stage 8 adds transactional acceptance with helper validation and optimistic locking. Only one helper can win a concurrent acceptance attempt; duplicate or competing attempts return 409.
 
 Stage 9 adds the status PATCH endpoint and centralized transitions through pickup, delivery, and completion. Cancellation is allowed before pickup. Invalid transitions and competing updates return 409 without overwriting saved state.
+
+Stage 10 adds an explicit already-accepted exception and a consistent JSON error contract for business errors, validation, Spring MVC request errors, and unexpected server failures. Protocol headers and field validation details are preserved; internal exception details stay out of responses.
 
 The Next.js frontend remains the existing setup page. Request forms, job pages, authentication, payments, GPS, and chat belong to later stages.
 
@@ -47,6 +49,7 @@ local-delivery/
 │       │   │   │                OsloDeadlineDeserializer
 │       │   │   ├── exception/   ResourceNotFoundException, RequestNotOpenException,
 │       │   │   │                SelfAcceptanceException, InvalidStatusTransitionException,
+│       │   │   │                RequestAlreadyAcceptedException,
 │       │   │   │                ApiExceptionHandler
 │       │   │   └── config/      DemoDataConfiguration, DatabaseMigrationConfiguration
 │       │   └── resources/
@@ -62,6 +65,7 @@ local-delivery/
 │           ├── UpdateStatusApiTest.java
 │           ├── LegacyMigrationTest.java
 │           ├── ApiErrorTest.java
+│           ├── ApiErrorContractTest.java
 │           ├── WorkflowDtoValidationTest.java
 │           └── PostgresTestDatabase.java
 └── frontend/  Existing Next.js application
@@ -224,7 +228,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=DeliveryApiTest test
 ```
 
-The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 220 cases, including the separate acceptance and status-update suites.
+The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 250 cases, including the separate acceptance, status-update, and error-contract suites.
 
 ## Stage 7 listing and detail verification
 
@@ -363,6 +367,80 @@ curl -i -X PATCH http://127.0.0.1:8080/api/requests/REQUEST_ID/status \
 
 Live verification samples are available as [request 8: DELIVERED](http://127.0.0.1:8080/api/requests/8), [request 9: cancelled before acceptance](http://127.0.0.1:8080/api/requests/9), and [request 10: cancelled before pickup](http://127.0.0.1:8080/api/requests/10). Create a new request to repeat the successful transitions; these samples are terminal.
 
+## Stage 10 — centralized API errors
+
+`ApiExceptionHandler` uses `@RestControllerAdvice` and extends Spring's `ResponseEntityExceptionHandler`. Business exceptions and Spring MVC failures return the same JSON structure with `Content-Type: application/json`:
+
+```json
+{
+  "timestamp": "2026-10-19T06:38:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Delivery request has already been accepted.",
+  "fields": {}
+}
+```
+
+`timestamp` is the current UTC time, `status` matches the HTTP response code, `error` is the HTTP reason phrase, and `message` explains the error. `fields` contains individual DTO validation messages, or `{}` when there are no field-specific messages. Responses exclude stack traces, exception class names, database details, and raw parser diagnostics.
+
+| Failure | HTTP status | Behavior |
+| --- | --- | --- |
+| `ResourceNotFoundException` | 404 | Explains whether the request, customer, or helper is missing |
+| `InvalidStatusTransitionException` | 409 | Explains the rejected transition |
+| `RequestAlreadyAcceptedException` | 409 | `Delivery request has already been accepted.` |
+| `RequestNotOpenException` | 409 | Explains that an unassigned non-OPEN request is unavailable |
+| Self-acceptance | 400 | Customer cannot accept their own request |
+| DTO validation | 422 | `Validation failed.` plus field messages |
+| Malformed JSON, unknown enum/field, or invalid path parameter | 422 | Safe generic input message |
+| Unknown endpoint | 404 | `Endpoint not found.` |
+| Unsupported HTTP method | 405 | JSON error and the original `Allow` header |
+| Unsupported response format | 406 | JSON error explaining the unsupported format |
+| Unsupported request content type | 415 | JSON error and the original supported-media `Accept` header |
+| Optimistic locking or database constraint conflict | 409 | Safe conflict message |
+| Database connection/transaction creation unavailable | 503 | Safe message asking the caller to retry later |
+| Unexpected application/serialization failure | 500 | Generic response; diagnostic exception logged on the server |
+
+The acceptance service raises `RequestAlreadyAcceptedException` when a helper is already assigned or the request is already ACCEPTED. It retains `RequestNotOpenException` for other unavailable, unassigned requests, such as a request cancelled before acceptance. Both checks happen before helper lookup and leave saved data unchanged. Concurrent stale writes retain their existing 409 behavior.
+
+The new handler branch is deliberately small:
+
+```java
+@ExceptionHandler(RequestAlreadyAcceptedException.class)
+ResponseEntity<ApiError> alreadyAccepted(RequestAlreadyAcceptedException error) {
+    return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
+}
+```
+
+The shared response builder supplies the timestamp, status, reason phrase, message, and fields. Framework handling keeps the appropriate HTTP status and headers while replacing framework-specific bodies with the same safe shape. Existing 400/404/409/422/503 business behavior is preserved.
+
+Run the 30 new contract cases and the existing error tests without PostgreSQL:
+
+```bash
+cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
+./mvnw -Dtest=ApiErrorContractTest,ApiErrorTest test
+```
+
+The contract suite covers all handler branches used by current endpoints, exact response fields, matching statuses/reason phrases, parseable UTC timestamps, field-validation messages, protocol headers, and suppression of internal diagnostics. The real PostgreSQL acceptance suite additionally checks the actual exception raised and confirms failed acceptance leaves the entire stored row unchanged. The full suite still runs with `./mvnw test` and PostgreSQL available.
+
+Manual checks on the current development data (all are expected to fail without changing records):
+
+1. Refresh [Swagger UI](http://127.0.0.1:8080/swagger-ui/index.html#/).
+2. GET `/api/requests/9223372036854775807`: expect 404 and `Delivery request not found.`
+3. POST `/api/requests` with `{}`: expect 422, `Validation failed.`, and all eight required field names in `fields`.
+4. POST `/api/requests/6/accept` with `{"helperId":2}`: request 6 is already accepted; expect 409 and `Delivery request has already been accepted.`
+5. PATCH `/api/requests/8/status` with `{"status":"PICKED_UP"}`: request 8 is DELIVERED; expect 409 explaining the invalid transition. Use `{"status":"UNKNOWN"}` to check the safe 422 input error.
+6. Run the terminal checks below to check unknown routes and unsupported methods/content types. Every response must have the five JSON fields shown above.
+
+```bash
+curl -i http://127.0.0.1:8080/api/missing-endpoint
+curl -i -X DELETE http://127.0.0.1:8080/api/requests/1
+curl -i -X POST http://127.0.0.1:8080/api/requests/1/accept \
+  -H 'Content-Type: text/plain' -d '{"helperId":2}'
+curl -i -H 'Accept: application/xml' http://127.0.0.1:8080/api/requests
+```
+
+Expect 404, 405, 415, and 406 respectively. The 405 response includes `Allow`; the 415 response includes `Accept`. On a fresh database, create and accept a request for step 4, and complete delivery for step 5 using the preceding stages. The 500 and 503 branches are verified with injected failures in isolated tests; no failure-injection endpoint is added to the running application.
+
 ## Manual creation and viewing tests
 
 1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://127.0.0.1:8080/docs).
@@ -427,7 +505,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 220 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, safe errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
+The 250 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, consistent business/validation/framework/server errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -451,6 +529,8 @@ Stage 7 verification on 2026-10-06 passed all 120 tests. The running application
 Stage 8 verification on 2026-10-06 passed all 155 tests with no failures or skips. The JAR was built and restarted, Flyway V3 applied successfully, and all existing records matched the saved backup. Live acceptance returned 200 for helper 2, removed request 6 from OPEN jobs, and persisted version 1. Missing resources returned 404, self-acceptance returned 400, invalid helper input returned 422, and repeated acceptance returned 409. Previous requests were unchanged.
 
 Stage 9 verification on 2026-10-18 passed all 220 backend tests with no failures or skips, including 65 status cases. The first attempt found Docker stopped; after starting the existing PostgreSQL container, the complete suite passed. The updated JAR was packaged and started on port 8080. Health, Swagger UI, and OpenAPI returned 200. New request 8 completed acceptance, pickup, delivery, and completion with version 4; requests 9 and 10 exercised both cancellation paths with versions 1 and 2. Live checks confirmed 409 for invalid transitions, 404 for a missing request, and 422 for invalid input. Database snapshots confirmed all two preexisting users and six requests remained unchanged. Flyway remained at V3, with no schema migration required.
+
+Stage 10 completion on 2026-10-19 verified a successful full run of 250 tests with zero failures, errors, or skips. The executable JAR was packaged and started, with health, Swagger UI, and OpenAPI returning 200. Eighteen live error checks verified consistent JSON for 400, 404, 405, 406, 409, 415, and 422 responses, including field errors and protocol headers. All two existing users and nine requests matched their database snapshot exactly, including timestamps and versions. No development records were created or changed. The schema remains at V3.
 
 ## Important implementation examples
 
@@ -525,12 +605,14 @@ Stage 8 creates `RequestNotOpenException.java`, `SelfAcceptanceException.java`, 
 
 Stage 9 creates `InvalidStatusTransitionException.java` and `UpdateStatusApiTest.java`. It updates `DeliveryStatus.java`, `DeliveryRequestController.java`, `DeliveryRequestService.java`, `ApiExceptionHandler.java`, `DeliveryApiTest.java`, `ApiErrorTest.java`, and this README. The existing `UpdateStatusRequest` DTO is reused. There are no schema or frontend changes.
 
+Stage 10 creates `RequestAlreadyAcceptedException.java` and `ApiErrorContractTest.java`. It updates `ApiExceptionHandler.java`, `DeliveryRequestService.java`, `AcceptRequestApiTest.java`, and this README. It reuses the existing error DTO and adds no dependency, schema migration, or frontend changes.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add delivery status transitions
+feat: add centralized API error handling
 ```
 
-Stop here. Stage 10's broader error-handling review will begin only when requested.
+Stop here. Stage 11 frontend setup will begin only when requested.

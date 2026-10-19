@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
+import com.localdelivery.exception.RequestAlreadyAcceptedException;
+import com.localdelivery.exception.RequestNotOpenException;
 import com.localdelivery.model.DeliveryStatus;
 import com.localdelivery.model.RequestCategory;
 import com.localdelivery.model.User;
@@ -148,7 +150,10 @@ class AcceptRequestApiTest {
         jdbc.update("UPDATE delivery_requests SET status = ?::request_status, helper_id = ? WHERE id = ?",
                 status.name(), status == DeliveryStatus.CANCELLED ? null : 2L, id);
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        assertThat(accept(id, 3).getResponse().getStatus()).isEqualTo(409);
+        var result = accept(id, 3);
+        assertThat(result.getResponse().getStatus()).isEqualTo(409);
+        assertThat(result.getResolvedException()).isInstanceOf(status == DeliveryStatus.CANCELLED
+                ? RequestNotOpenException.class : RequestAlreadyAcceptedException.class);
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
     }
 
@@ -158,7 +163,11 @@ class AcceptRequestApiTest {
         long id = create(RequestCategory.BUY).get("id").asLong();
         assertThat(accept(id, 2).getResponse().getStatus()).isEqualTo(200);
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        assertThat(accept(id, helperId).getResponse().getStatus()).isEqualTo(409);
+        var result = accept(id, helperId);
+        assertThat(result.getResponse().getStatus()).isEqualTo(409);
+        assertThat(result.getResolvedException()).isInstanceOf(RequestAlreadyAcceptedException.class);
+        assertThat(json.readTree(result.getResponse().getContentAsString()).get("message").asText())
+                .isEqualTo("Delivery request has already been accepted.");
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
     }
 
