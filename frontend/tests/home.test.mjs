@@ -38,7 +38,24 @@ for (const [path, label, heading] of pages) {
 		assert.equal((navigation.match(/aria-current="page"/g) ?? []).length, 1);
 		assert.ok(navigation.includes(`aria-current="page" href="${path}"`));
 		assert.match(html, /href="#main-content"/);
-		if (path !== "/") {
+		if (path === "/requests/new") {
+			assert.match(html, /<form[\s>]/);
+			assert.match(html, />Post request<\/button>/);
+			for (const name of [
+				"category",
+				"title",
+				"description",
+				"pickupAddress",
+				"deliveryAddress",
+				"shoppingBudget",
+				"helperReward",
+				"deadline",
+			]) {
+				assert.ok(html.includes(`name="${name}"`));
+				assert.ok(html.includes(`for="${name}"`));
+			}
+			assert.doesNotMatch(html, /Coming soon/);
+		} else if (path !== "/") {
 			assert.match(html, /Coming soon/);
 			assert.doesNotMatch(html, /<form[\s>]/);
 		}

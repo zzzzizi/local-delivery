@@ -1,6 +1,6 @@
-# Local Delivery — Stage 11 frontend structure complete
+# Local Delivery — Stage 12 request creation form complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Backend features through Stage 10 and Stage 11's frontend navigation, page shells, API configuration, and reusable API helper are complete. Stage 12's request form is next and has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Backend features through Stage 10, Stage 11's frontend structure, and Stage 12's request creation form are complete. Stage 13's available-jobs page is next and has not been started.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -14,7 +14,9 @@ Stage 9 adds the status PATCH endpoint and centralized transitions through picku
 
 Stage 10 adds an explicit already-accepted exception and a consistent JSON error contract for business errors, validation, Spring MVC request errors, and unexpected server failures. Protocol headers and field validation details are preserved; internal exception details stay out of responses.
 
-Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. The four feature pages clearly say “Coming soon”; forms, job listings, and tracking functionality remain for their respective later stages. Authentication, payments, GPS, and chat also remain out of scope.
+Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. Stage 12 now implements Create Request; Available Jobs, My Requests, and My Deliveries still show “Coming soon”. Job listings and tracking remain for their respective later stages. Authentication, payments, GPS, and chat also remain out of scope.
+
+Stage 12 adds the eight-field Create Request form, posts as customer 1, prevents duplicate submissions while pending, shows client/backend validation and server errors, and displays the saved request after success. Deadline entry and display use Oslo time.
 
 ## Stack and architecture
 
@@ -464,12 +466,12 @@ The application now has five routes:
 | Page | Route | Current behavior |
 | --- | --- | --- |
 | Home | `/` | Introduction and links to create a request or view jobs |
-| Create Request | `/requests/new` | Page shell; request form comes in Stage 12 |
+| Create Request | `/requests/new` | Working form and saved confirmation (Stage 12) |
 | Available Jobs | `/jobs` | Page shell; live job listing comes in Stage 13 |
 | My Requests | `/my-requests` | Page shell; customer tracking comes in Stage 15 |
 | My Deliveries | `/my-deliveries` | Page shell; helper workflow comes in Stage 16 |
 
-All pages share the root layout, header, navigation, and footer. Navigation uses Next.js `Link` and `usePathname`, with `aria-current="page"` on the active item. Links wrap on narrow screens; keyboard users can skip directly to the main content. Each feature page has its own document title and a clear availability notice. No request form, simulated job data, or working delivery controls are added in this stage.
+All pages share the root layout, header, navigation, and footer. Navigation uses Next.js `Link` and `usePathname`, with `aria-current="page"` on the active item. Links wrap on narrow screens; keyboard users can skip directly to the main content. Each feature page has its own document title. Stage 11 introduced page shells; Stage 12 implements Create Request. The other three feature routes retain their availability notices.
 
 Configure the backend once in `frontend/.env.local`:
 
@@ -497,7 +499,7 @@ try {
 
 The helper serializes JSON bodies, sets JSON headers, disables caching by default, uses a ten-second timeout unless the caller supplies an abort signal, and returns parsed JSON. Empty successful responses return `undefined`. Failed HTTP responses throw `ApiError`, preserving the backend message, HTTP status, and field-validation messages. Non-JSON failures receive a safe fallback message. Transport failures and cancellation propagate to the caller.
 
-Server calls use the configured backend URL directly. Browser calls use the same-origin `/backend-api` prefix; `next.config.mjs` rewrites that prefix to the configured backend `/api` root. This lets later client forms reuse the helper without adding CORS permissions to the Java backend. Backend URLs are kept out of page components. The proxy forwards methods and request bodies, including the backend's existing error responses.
+Server calls use the configured backend URL directly. Browser calls use the same-origin `/backend-api` prefix; `next.config.mjs` rewrites that prefix to the configured backend `/api` root. This lets client forms reuse the helper without adding CORS permissions to the Java backend. Backend URLs are kept out of page components. The proxy forwards methods and request bodies, including the backend's existing error responses.
 
 For example, the shared request code chooses its base in one place:
 
@@ -515,13 +517,13 @@ npm run test:unit
 npm run build
 ```
 
-To test the production build, stop any running frontend, run `npm run start`, and run `npm test` in another terminal with the Java backend also running. Use `npm run dev` when editing the frontend; do not run both servers on port 3000 at once. `npm test` includes 24 isolated API/configuration cases and eight live checks covering all five pages, navigation, active links, page titles, direct backend access, proxy health, and validation error forwarding. `FRONTEND_TEST_URL` can override the test frontend address. Unit tests do not require either server.
+To test the production build, stop any running frontend, run `npm run start`, and run `npm test` in another terminal with the Java backend also running. Use `npm run dev` when editing the frontend; do not run both servers on port 3000 at once. `npm test` includes 24 isolated API/configuration cases, 21 request-form payload/validation/timezone cases, and eight live checks covering all five pages, navigation, active links, page titles, direct backend access, proxy health, and validation error forwarding. `FRONTEND_TEST_URL` can override the test frontend address. Unit tests do not require either server.
 
 Manual testing:
 
 1. Open [Home](http://127.0.0.1:3000/). Click each of the five navigation links. Confirm its heading, document title, and active underline change.
-2. Refresh each route directly. All should load successfully with the same navigation. The four feature pages should display “Coming soon”.
-3. On Home, click **Create a request** and **View available jobs**; confirm they reach `/requests/new` and `/jobs` respectively. Use **Back to home** to return from a feature page.
+2. Refresh each route directly. All should load successfully with the same navigation. Create Request should show its form; Available Jobs, My Requests, and My Deliveries should display “Coming soon”.
+3. On Home, click **Create a request** and **View available jobs**; confirm they reach `/requests/new` and `/jobs` respectively. Use the **Home** navigation link to return.
 4. Use Tab to focus **Skip to content**, then Enter. Focus should move to the main content. At a narrow mobile width, confirm navigation wraps and buttons remain usable without horizontal scrolling.
 5. Open [proxied health](http://127.0.0.1:3000/backend-api/health). Expect `{"status":"ok"}` from the Java backend.
 6. Run the following command. Expect HTTP 422 with `Validation failed.` and field errors; no request is created:
@@ -530,6 +532,58 @@ Manual testing:
 curl -i -X POST http://127.0.0.1:3000/backend-api/requests \
   -H 'Content-Type: application/json' -d '{}'
 ```
+
+## Stage 12 — create a delivery request
+
+Open [Create Request](http://127.0.0.1:3000/requests/new). The page is a Server Component for metadata and introductory content; `CreateRequestForm` is a Client Component for input, validation, and submission. It reuses the existing JSON helper and same-origin proxy to call `POST /api/requests`.
+
+| Field | Behavior |
+| --- | --- |
+| Category | Required: Package delivery (`PACKAGE`), Shopping (`BUY`), or Pickup (`PICKUP`) |
+| Title | Required; trimmed; maximum 200 characters |
+| Description | Required; trimmed; supports multiple lines |
+| Pickup address | Required; trimmed; maximum 500 characters |
+| Delivery address | Required; trimmed; maximum 500 characters |
+| Shopping budget | Optional NOK amount; blank becomes JSON `null` |
+| Helper reward | Required NOK amount; zero is allowed |
+| Deadline | Required date and time, interpreted in `Europe/Oslo` |
+
+Amounts accept 0 through 99,999,999.99, with up to two decimal places and a dot as the decimal separator. They are sent as JSON numbers, matching the Java DTO; the confirmation displays the backend's exact two-decimal strings. `customerId` is fixed to `1` for this MVP, with no editable identity, helper, or status fields. Authentication remains a later stage.
+
+Client validation catches empty/whitespace-only text, invalid categories, length limits, and invalid money. Java remains authoritative for validation, including whether a deadline is in the future and whether an Oslo time is valid around daylight-saving changes. The form sends an offset-free local deadline so it is not accidentally interpreted in the browser's timezone. Saved UTC deadlines are displayed with `Intl.DateTimeFormat` explicitly set to `Europe/Oslo`.
+
+While submitting, the fieldset and submit button are disabled, the button reads **Posting request…**, and a status message announces progress. A synchronous ref also blocks repeated submission events. Backend field errors appear next to their controls with `aria-invalid` and `aria-describedby`; the summary receives focus. Other HTTP errors show the backend message. Connection/timeout failures keep the entries and explain that submission could not be confirmed, without automatically retrying a potentially saved request.
+
+After success, the form is replaced by a confirmation using the returned request: ID, category, title, description, addresses, budget, reward, deadline, status, and helper availability. **Create another request** clears the form and focuses Category. This stage does not implement the later request-details route or job listing.
+
+The submission uses the existing API helper:
+
+```tsx
+const result = prepareRequest(values);
+if (result.errors) {
+  setErrors(result.errors);
+  setMessage("Please correct the highlighted fields.");
+  return;
+}
+const request = await apiRequest<DeliveryRequest>("/requests", {
+  method: "POST",
+  body: result.payload, // Includes customerId: 1; numeric amounts; Oslo wall time.
+});
+```
+
+Manual Stage 12 verification:
+
+1. Start PostgreSQL, the Java backend on `127.0.0.1:8080`, and the frontend on `127.0.0.1:3000` using the setup commands above. Open [Create Request](http://127.0.0.1:3000/requests/new).
+2. Click **Post request** with the form empty. Expect seven inline errors (budget is optional), focus on the error summary, and no saved row.
+3. Choose **Shopping**; enter title **Buy groceries**, description **Milk, eggs and bread. Please keep the receipt.**, pickup **KIWI Majorstuen, Oslo**, delivery **Frogner, Oslo**, budget **300.25**, reward **80.50**, and deadline **15 January 2027, 18:00** in Oslo. Use a later date if this example is no longer in the future.
+4. Before posting, change reward to **-1** and submit. Expect a money error with all entries retained. Restore **80.50**, set the deadline to **15 January 2020, 18:00**, and submit. Expect the backend's **must be a future date** field error and no saved row.
+5. Restore the future deadline and click **Post request** once. Expect a disabled **Posting request…** button, followed by **Request created**, a generated ID, **OPEN**, **Waiting for a helper**, budget **300.25 NOK**, reward **80.50 NOK**, and the same Oslo deadline. Fast responses may make the loading state brief. Each successful submission creates one row.
+6. In [Swagger UI](http://127.0.0.1:8080/docs), execute `GET /api/requests/{id}` using the ID from the confirmation. Confirm `customerId: 1`, `helperId: null`, the saved values, and deadline `2027-01-15T17:00:00Z` for the winter example.
+7. Click **Create another request**. Expect blank inputs with Category focused. For a separate optional-budget check, choose **Pickup**, fill the text fields and a future deadline, leave budget empty, and set reward to **0**. After submission, expect **Not specified** and **0.00 NOK**.
+8. For a local connectivity check, stop only your Java backend, keep the frontend running, fill a valid form, and submit. Expect an error, retained values, and an enabled button. Restart Java afterward. Do not retry a timed-out submission until checking whether it was saved.
+9. At a 390px mobile width, check the form and confirmation stack into one column without horizontal scrolling. Use Tab to reach each input and the submit button; errors and successful confirmation should receive focus.
+
+Stage 12 automated checks: `npm run lint`, `npm run typecheck`, `npm run test:unit` (45 cases), `npm run build`, `npm test` with both servers running (53 cases), and `./mvnw test` in `backend` (250 cases). Tests validate the payload contract, fixed customer ID, all categories, optional/zero amounts, text limits, invalid money, and winter/summer Oslo display. The live route test now checks the actual form fields and labels while preserving the three later-stage placeholders.
 
 ## Manual creation and viewing tests
 
@@ -622,7 +676,9 @@ Stage 9 verification on 2026-10-18 passed all 220 backend tests with no failures
 
 Stage 10 completion on 2026-10-19 verified a successful full run of 250 tests with zero failures, errors, or skips. The executable JAR was packaged and started, with health, Swagger UI, and OpenAPI returning 200. Eighteen live error checks verified consistent JSON for 400, 404, 405, 406, 409, 415, and 422 responses, including field errors and protocol headers. All two existing users and nine requests matched their database snapshot exactly, including timestamps and versions. No development records were created or changed. The schema remains at V3.
 
-Stage 11 verification on 2026-10-19 passed frontend lint, TypeScript checking, the production build, all 32 frontend tests, and all 250 backend regression tests. The production frontend is running on `127.0.0.1:3000`. Browser checks exercised every navigation link, active-link updates, page content, keyboard skip navigation, and the Home/My Deliveries layouts at 390px width with no horizontal overflow. Browser logs showed no warnings or errors during these checks. Live API checks verified direct and proxied health, a missing-request error, and a proxied validation error. No successful mutation was sent to development data. Stage 12 remains unstarted.
+Stage 11 verification on 2026-10-19 passed frontend lint, TypeScript checking, the production build, all 32 frontend tests, and all 250 backend regression tests. The production frontend is running on `127.0.0.1:3000`. Browser checks exercised every navigation link, active-link updates, page content, keyboard skip navigation, and the Home/My Deliveries layouts at 390px width with no horizontal overflow. Browser logs showed no warnings or errors during these checks. Live API checks verified direct and proxied health, a missing-request error, and a proxied validation error. No successful mutation was sent to development data during Stage 11.
+
+Stage 12 verification on 2026-10-20 passed frontend lint, TypeScript checking, the production build, all 53 frontend tests, and all 250 backend regression tests. Browser checks covered empty fields, invalid money, real backend future-deadline validation, successful creation, confirmation display, reset/focus, and the 390px mobile layout. An isolated temporary API and second frontend verified a delayed 503, disabled loading state, exactly one POST on double-click, null optional budget/zero reward serialization, and timeout recovery without automatic retries. Those temporary servers were stopped after verification. Request **11**, **Stage 12 verification — groceries**, was created through the production frontend; its saved amounts, customer, status, helper, and UTC deadline were checked through the Java API. Database snapshots confirmed that all two existing users and nine existing requests, including timestamps and versions, remained unchanged. No schema or backend source change was needed.
 
 ## Important implementation examples
 
@@ -701,12 +757,23 @@ Stage 10 creates `RequestAlreadyAcceptedException.java` and `ApiErrorContractTes
 
 Stage 11 creates `frontend/.env.example`, `frontend/next.config.mjs`, the four feature page files, `navigation.tsx`, `page-shell.tsx`, `api-config.mjs`, `api.ts`, and `tests/api.test.mjs`. It updates the root layout, homepage, global CSS, `tests/home.test.mjs`, frontend package/lock files, and this README. Node 22.17+ is declared for native TypeScript tests; no package dependency is added. Local `frontend/.env.local` is created from the template and remains ignored. Java source and database schema are unchanged.
 
+Stage 12 files:
+
+- Added `frontend/src/components/create-request-form.tsx`: accessible form, loading/error handling, and saved confirmation.
+- Added `frontend/src/lib/create-request.ts`: typed payload/response, validation, and Oslo date formatting.
+- Added `frontend/tests/create-request.test.mjs`: 21 request payload, validation, and date-format tests.
+- Updated `frontend/src/app/requests/new/page.tsx`: renders the form instead of the placeholder.
+- Updated `frontend/src/app/globals.css`: form controls, feedback, confirmation, and mobile layout.
+- Updated `frontend/tests/home.test.mjs`: verifies the new form and labels on the running page.
+- Updated `frontend/package.json`: includes request-form tests in `test:unit`.
+- Updated `README.md`: Stage 12 behavior, verification, and manual steps. No dependency was added.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add initial frontend structure
+feat: add delivery request creation form
 ```
 
-Stop here. Stage 12's request creation form will begin only when requested.
+Stop here. Stage 13's available-jobs page will begin only when requested.
