@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync } from "node:fs";
 import { ApiError, apiRequest } from "../src/lib/api.ts";
+import { formatOsloDate } from "../src/lib/create-request.ts";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 const baseUrl = process.env.FRONTEND_TEST_URL ?? "http://127.0.0.1:3000";
@@ -55,6 +56,10 @@ for (const [path, label, heading] of pages) {
 				assert.ok(html.includes(`for="${name}"`));
 			}
 			assert.doesNotMatch(html, /Coming soon/);
+		} else if (path === "/jobs") {
+			assert.match(html, /aria-label="Available requests"/);
+			assert.match(html, />Refresh jobs<\/button>/);
+			assert.doesNotMatch(html, /Coming soon/);
 		} else if (path !== "/") {
 			assert.match(html, /Coming soon/);
 			assert.doesNotMatch(html, /<form[\s>]/);
@@ -71,6 +76,54 @@ test("the shared API helper reaches the configured Java backend", async () => {
 			error.status === 404 &&
 			error.message === "Delivery request not found.",
 	);
+});
+
+test("available-job cards match the live API fields, order, and detail links", async () => {
+	const jobs = await apiRequest("/requests");
+	const response = await fetch(`${baseUrl}/jobs`, {
+		signal: AbortSignal.timeout(15000),
+	});
+	assert.equal(response.status, 200);
+	const html = (await response.text()).replaceAll(/<!--.*?-->/gs, "");
+	const cards =
+		html.match(/<a\b[^>]*class="job-card"[^>]*>[\s\S]*?<\/a>/g) ?? [];
+	assert.equal(cards.length, jobs.length);
+	if (!jobs.length) assert.match(html, /No jobs available yet/);
+	const labels = {
+		PACKAGE: "Package delivery",
+		BUY: "Shopping",
+		PICKUP: "Pickup",
+	};
+	const escape = (value) =>
+		String(value)
+			.replaceAll("&", "&amp;")
+			.replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;")
+			.replaceAll('"', "&quot;")
+			.replaceAll("'", "&#x27;");
+	for (const [index, job] of jobs.entries()) {
+		assert.equal(job.status, "OPEN");
+		const card = cards[index];
+		assert.ok(card.includes(`href="/requests/${job.id}"`));
+		for (const text of [
+			labels[job.category],
+			job.title,
+			job.pickupAddress,
+			job.deliveryAddress,
+			`${job.helperReward} NOK`,
+			formatOsloDate(job.deadline),
+			"OPEN",
+		]) {
+			assert.ok(
+				card.includes(escape(text)),
+				`Missing ${text} on request ${job.id}`,
+			);
+		}
+		assert.equal(
+			card.match(/<time\b[^>]*datetime="([^"]+)"/i)?.[1],
+			job.deadline,
+		);
+	}
 });
 
 test("the same-origin proxy reaches backend health", async () => {
