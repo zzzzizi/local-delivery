@@ -194,7 +194,8 @@ h2 {
 	border: 0;
 }
 .request-form,
-.request-confirmation {
+.request-confirmation,
+.request-detail {
 	max-width: 760px;
 }
 .form-note,
@@ -354,6 +355,13 @@ fieldset:disabled .button {
 	justify-content: space-between;
 	gap: 20px;
 	margin-bottom: 24px;
+}
+.request-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 14px;
+	margin-top: 24px;
 }
 .jobs-count {
 	margin: 0;

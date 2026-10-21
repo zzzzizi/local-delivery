@@ -1,6 +1,6 @@
-# Local Delivery — Stage 13 available jobs page complete
+# Local Delivery — Stage 14 request details and acceptance complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Backend features through Stage 10 and frontend Stages 11–13 are complete, including request creation and available jobs. Stage 14's request details and acceptance interface is next and has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Backend features through Stage 10 and frontend Stages 11–14 are complete, including request creation, available jobs, request details, and job acceptance. Stage 15 (My Requests) has not been started.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -18,7 +18,9 @@ Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deli
 
 Stage 12 adds the eight-field Create Request form, posts as customer 1, prevents duplicate submissions while pending, shows client/backend validation and server errors, and displays the saved request after success. Deadline entry and display use Oslo time.
 
-Stage 13 fetches OPEN requests and displays linked cards with category, title, addresses, reward, Oslo deadline, and status. Loading, empty results, API errors, and refresh/retry are handled. Card destinations are prepared for Stage 14.
+Stage 13 fetches OPEN requests and displays linked cards with category, title, addresses, reward, Oslo deadline, and status. Loading, empty results, API errors, and refresh/retry are handled. Card destinations now open the Stage 14 detail page.
+
+Stage 14 displays complete request details and accepts OPEN jobs as helper 2. It refreshes after acceptance, handles already-accepted conflicts, prevents duplicate submissions while pending, and provides loading, retry, not-found, and manual-refresh states.
 
 ## Stack and architecture
 
@@ -80,13 +82,15 @@ local-delivery/
     │   ├── app/
     │   │   ├── layout.tsx / globals.css / page.tsx
     │   │   ├── requests/new/page.tsx
+    │   │   ├── requests/[id]/page.tsx / not-found.tsx
     │   │   ├── jobs/page.tsx
     │   │   ├── my-requests/page.tsx
     │   │   └── my-deliveries/page.tsx
     │   ├── components/  navigation.tsx, page-shell.tsx, create-request-form.tsx,
-    │   │                available-jobs.tsx, refresh-jobs-button.tsx
-    │   └── lib/         api.ts, api-config.mjs, create-request.ts, available-jobs.ts
-    └── tests/           api.test.mjs, create-request.test.mjs, available-jobs.test.mjs, home.test.mjs
+    │   │                available-jobs.tsx, refresh-jobs-button.tsx, request-details.tsx
+    │   └── lib/         api.ts, api-config.mjs, create-request.ts, available-jobs.ts, request-details.ts
+    └── tests/           api.test.mjs, create-request.test.mjs, available-jobs.test.mjs,
+                         request-details.test.mjs, home.test.mjs
 ```
 
 ## Prerequisites
@@ -471,6 +475,7 @@ The application now has five routes:
 | Home | `/` | Introduction and links to create a request or view jobs |
 | Create Request | `/requests/new` | Working form and saved confirmation (Stage 12) |
 | Available Jobs | `/jobs` | Live OPEN request cards, refresh/retry, empty/error/loading states (Stage 13) |
+| Request Details | `/requests/{id}` | Complete details, accept as helper 2, conflicts, refresh/retry (Stage 14) |
 | My Requests | `/my-requests` | Page shell; customer tracking comes in Stage 15 |
 | My Deliveries | `/my-deliveries` | Page shell; helper workflow comes in Stage 16 |
 
@@ -616,12 +621,46 @@ Manual Stage 13 verification:
 1. Start the database, Java backend, and frontend using the commands above. Open [Available Jobs](http://127.0.0.1:3000/jobs), or follow **View available jobs** from Home.
 2. Compare the cards with [the API response](http://127.0.0.1:8080/api/requests). Expect the same count and order, only OPEN statuses, matching category/title/addresses, two-decimal rewards, and deadlines displayed in Oslo time. The existing development data has five OPEN requests at this stage's verification.
 3. Click **Refresh jobs**. Expect **Refreshing…** while loading and an updated list afterward. With a fast local API this state can be brief.
-4. Tab to a card and press Enter. Its URL should be `/requests/{id}`. **The detail route currently returns 404 because its implementation and Accept Job control belong to Stage 14.** Use Back or the Available Jobs navigation link to return. Stage 13 adds the requested links without beginning Stage 14.
+4. Tab to a card and press Enter. Its URL should be `/requests/{id}`. The Stage 14 detail page now loads the request and shows **Accept Job** when OPEN. Use **Back to available jobs** or the navigation link to return. At the original Stage 13 checkpoint, this route was intentionally not implemented.
 5. At a 390px mobile width, expect one column, wrapping text, visible rewards/deadlines, and no horizontal scrolling. At desktop width, expect two columns.
 6. To check recovery locally, stop only the Java backend, then click **Refresh jobs**. Expect **We couldn’t load available jobs** and **Try again**. Restart Java and click **Try again**; the cards should return. Existing records are unchanged by these reads.
 7. To check an empty list without deleting data, use a separate test backend returning `[]` from `GET /api/requests`. Set `NEXT_PUBLIC_API_URL` for a temporary frontend instance and restart/rebuild it (production public environment values are compiled at build time). Expect **0 open requests**, **No jobs available yet**, and **Create a request**. A delayed response checks loading; a 503 response checks the API message and retry. Restore the real backend configuration after testing.
 
 Automated checks are `npm run lint`, `npm run typecheck`, `npm run test:unit` (52 cases), `npm run build`, `npm test` with both servers running (61 cases), and `./mvnw test` in `backend` (250 cases). New unit cases cover the jobs-response contract, malformed payloads, unsafe/duplicate IDs, unavailable statuses, money precision, and explicit-offset deadlines. The live test compares every displayed card's fields, order, and destination with the real API.
+
+## Stage 14 — request details and Accept Job
+
+Open a card on [Available Jobs](http://127.0.0.1:3000/jobs). `/requests/{id}` fetches `GET /api/requests/{id}` at request time and displays category, title, description, both addresses, budget, reward, Oslo deadline, status, customer/helper IDs, and creation/update times. Missing or invalid IDs show **Request not found** with a link back. A loading message appears during the server fetch; other failures offer **Try again**.
+
+**Accept Job** appears only for OPEN requests. It sends `POST /api/requests/{id}/accept` with `{ "helperId": 2 }`, then performs a fresh GET and updates the card. Both controls are disabled while pending, and a synchronous guard prevents a rapid double-click from issuing a second POST. Notices receive keyboard focus and announce success/errors. **Refresh request** reloads the current details without accepting anything.
+
+A 409 displays the backend's already-accepted/no-longer-open message and refreshes the saved status/helper. If that refresh fails or still says OPEN, acceptance stays disabled until a manual refresh succeeds. Network/timeouts and server failures also reconcile with GET, without automatically repeating a POST. If acceptance succeeds but its follow-up GET fails, the saved acceptance response remains visible with a refresh warning. Known business/validation errors retain the backend message. Responses are validated before rendering.
+
+Important code in `frontend/src/lib/request-details.ts`:
+
+```ts
+const data = await apiRequest<unknown>(`/requests/${id}/accept`, {
+  method: "POST",
+  body: { helperId: 2 },
+});
+// Validate the accepted response, then fetch the latest saved details:
+const current = await fetchRequest(id);
+```
+
+The dynamic route awaits Next.js's promised `params`; its async loader uses `connection()` inside `Suspense`. The existing API helper supplies no-store requests and a ten-second timeout. The client component owns only the displayed request and acceptance/refresh state. No backend endpoint, schema, or dependency change was needed. `allowImportingTsExtensions` lets the workflow import the same API module in both Next.js and Node's native TypeScript tests. Helper 2 remains the planned MVP identity; authentication and Stage 15 tracking are not implemented.
+
+Manual Stage 14 verification:
+
+1. Start the database, Java backend, and frontend as above. Open [the accepted verification request](http://127.0.0.1:3000/requests/12). Expect ACCEPTED, **Helper #2 (you)**, no Accept Job control, and a working **Refresh request** button.
+2. To repeat acceptance, create a clearly labelled demo request through [Create Request](http://127.0.0.1:3000/requests/new), using a future deadline. This creates one new record; use that record for the following steps.
+3. Open its card from Available Jobs. Compare all details with `GET /api/requests/{id}` in Swagger, including exact two-decimal amounts and Oslo time. Open this same detail URL in a second tab before accepting.
+4. In the first tab, click **Accept Job**. Expect **Accepting job…**, then a success notice, ACCEPTED status, helper 2, and removal of Accept Job. A fast local response may make loading brief. Reload and verify the assignment persists.
+5. In the stale second tab, click **Accept Job**. Expect **Delivery request has already been accepted**, refreshed ACCEPTED status/helper 2, and no Accept Job button. This must not overwrite the first acceptance.
+6. Follow **Back to available jobs**. The accepted demo should no longer be listed. Open `/requests/9223372036854775807` or `/requests/invalid-id` and expect the useful not-found page.
+7. At 390px width, check wrapped content, one-column details, accessible controls, and no horizontal overflow. Use keyboard navigation to operate the controls; feedback should receive focus.
+8. For fault checks, use an isolated fake API and a second frontend with a different `NEXT_PUBLIC_API_URL`. Check initial GET 503 → Try again → recovery; delayed POST with double-click → one POST; POST 409 followed by GET 503 → acceptance blocked until Refresh succeeds; and POST 200 followed by GET 503 → saved ACCEPTED details remain visible. Do not alter existing database records to simulate failures.
+
+Automated checks: `npm run lint`, `npm run typecheck`, `npm run test:unit` (**74 cases**), `npm run build`, `npm test` with both servers running (**87 cases**), and `./mvnw test` in `backend` (**250 cases**). The 22 new unit cases cover the detail contract, IDs, successful acceptance and refresh, conflicts, uncertain outcomes, saved-response fallback, and business errors. Four added live tests cover the detail route, missing/invalid IDs, and proxied acceptance validation without mutations.
 
 ## Manual creation and viewing tests
 
@@ -719,6 +758,9 @@ Stage 11 verification on 2026-10-19 passed frontend lint, TypeScript checking, t
 Stage 12 verification on 2026-10-20 passed frontend lint, TypeScript checking, the production build, all 53 frontend tests, and all 250 backend regression tests. Browser checks covered empty fields, invalid money, real backend future-deadline validation, successful creation, confirmation display, reset/focus, and the 390px mobile layout. An isolated temporary API and second frontend verified a delayed 503, disabled loading state, exactly one POST on double-click, null optional budget/zero reward serialization, and timeout recovery without automatic retries. Those temporary servers were stopped after verification. Request **11**, **Stage 12 verification — groceries**, was created through the production frontend; its saved amounts, customer, status, helper, and UTC deadline were checked through the Java API. Database snapshots confirmed that all two existing users and nine existing requests, including timestamps and versions, remained unchanged. No schema or backend source change was needed.
 
 Stage 13 verification on 2026-10-20 passed frontend lint, TypeScript checking, the production build, all 61 frontend tests, and all 250 backend regression tests. The production jobs page displays five real OPEN requests. Browser checks exercised refresh, loading, empty results, a 503 error, invalid response handling, retry recovery, timeout handling, zero reward, summer Oslo time, card links, and the 390px mobile layout without horizontal overflow. Failure/empty checks used a temporary isolated API and frontend; both temporary servers were stopped afterward. Before/after database snapshots confirmed all two users and ten requests were identical, including timestamps and versions. No records were created or changed. No backend source, schema migration, or dependency change was required.
+
+Stage 14 verification on 2026-10-21 passed frontend lint, TypeScript checking, the production build, all 87 frontend tests (74 unit and 13 live), and all 250 backend regression tests, with zero failures or skips. Browser checks verified real acceptance, a stale-tab 409, refresh, persisted helper assignment, removal from Available Jobs, not-found handling, keyboard feedback focus, and the 390px layout without horizontal overflow. An isolated temporary API/frontend also verified loading, initial 503/retry recovery, exactly one POST per double-click, a conflict with failed refresh, manual recovery, and a successful POST with a failed follow-up GET. Both temporary servers were stopped. The production acceptance tab had no browser warnings or errors. Request **12**, **Stage 14 verification — groceries**, is the only added development record and is ACCEPTED by helper 2 with version 1. Database snapshots confirmed all two users and ten pre-existing requests remained exactly unchanged, including timestamps and versions. Stage 15 has not been started.
+
 
 ## Important implementation examples
 
@@ -820,12 +862,24 @@ Stage 13 files:
 - Updated `frontend/package.json`: includes jobs-response tests in `test:unit`.
 - Updated `README.md`: behavior, implementation, testing, scope, and file list.
 
+Stage 14 files:
+
+- Added `frontend/src/app/requests/[id]/page.tsx`: dynamic server fetch, loading, and retry.
+- Added `frontend/src/app/requests/[id]/not-found.tsx`: useful missing-request page.
+- Added `frontend/src/components/request-details.tsx`: complete details, acceptance/refresh controls, loading guard, and focused feedback.
+- Added `frontend/src/lib/request-details.ts`: ID/response validation and acceptance reconciliation.
+- Added `frontend/tests/request-details.test.mjs`: 22 workflow and response-contract tests.
+- Updated `frontend/tests/home.test.mjs`: four live detail/proxy checks.
+- Updated `frontend/src/app/globals.css`: detail width and wrapping action controls.
+- Updated `frontend/package.json` and `frontend/tsconfig.json`: native workflow test inclusion and TypeScript import support.
+- Updated `README.md`: scope, behavior, verification, manual steps, and changed files.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add available jobs page
+feat: add job acceptance interface
 ```
 
-Stop here. Stage 14's request details and acceptance interface will begin only when requested.
+Stop here. Stage 15 (My Requests) will begin only when requested.

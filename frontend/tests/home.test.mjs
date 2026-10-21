@@ -147,3 +147,60 @@ test("the proxy forwards method and body and preserves validation errors without
 	assert.equal(error.status, 422);
 	assert.equal(typeof error.fields.title, "string");
 });
+
+test("request detail route renders live request fields and acceptance controls", async (t) => {
+	const jobs = await apiRequest("/requests");
+	if (!jobs.length)
+		return t.skip("No OPEN requests available in this database.");
+	const request = await apiRequest(`/requests/${jobs[0].id}`);
+	const response = await fetch(`${baseUrl}/requests/${request.id}`);
+	assert.equal(response.status, 200);
+	const html = (await response.text()).replaceAll(/<!--.*?-->/gs, "");
+	const escape = (value) =>
+		String(value)
+			.replaceAll("&", "&amp;")
+			.replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;")
+			.replaceAll('"', "&quot;")
+			.replaceAll("'", "&#x27;");
+	assert.match(html, /<h1>Request Details<\/h1>/);
+	assert.match(html, /aria-label="Request details"/);
+	for (const value of [
+		request.title,
+		request.description,
+		request.pickupAddress,
+		request.deliveryAddress,
+		`${request.helperReward} NOK`,
+		formatOsloDate(request.deadline),
+		"No helper assigned",
+		"OPEN",
+	]) {
+		assert.ok(html.includes(escape(value)), `Missing detail: ${value}`);
+	}
+	assert.match(html, />Accept Job<\/button>/);
+	assert.match(html, />Refresh request<\/button>/);
+	assert.match(html, /href="\/jobs"/);
+});
+
+for (const id of ["9223372036854775807", "invalid-id"]) {
+	test(`missing or invalid request ${id} has a useful not-found page`, async () => {
+		const response = await fetch(`${baseUrl}/requests/${id}`);
+		const html = await response.text();
+		assert.match(html, /Request not found/);
+		assert.match(html, /name="robots" content="noindex"/);
+		assert.doesNotMatch(html, />Accept Job<\/button>/);
+		assert.match(html, /href="\/jobs"/);
+	});
+}
+
+test("acceptance proxy preserves helper validation without mutating a request", async () => {
+	const response = await fetch(`${baseUrl}/backend-api/requests/1/accept`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: "{}",
+	});
+	assert.equal(response.status, 422);
+	const error = await response.json();
+	assert.equal(error.message, "Validation failed.");
+	assert.equal(typeof error.fields.helperId, "string");
+});
