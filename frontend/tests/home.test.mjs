@@ -6,6 +6,14 @@ import { formatOsloDate } from "../src/lib/create-request.ts";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 const baseUrl = process.env.FRONTEND_TEST_URL ?? "http://127.0.0.1:3000";
+const statusLabels = {
+	OPEN: "Open",
+	ACCEPTED: "Accepted",
+	PICKED_UP: "Picked up",
+	DELIVERING: "Delivering",
+	DELIVERED: "Delivered",
+	CANCELLED: "Cancelled",
+};
 const pages = [
 	["/", "Home", "What do you need<br/>help with?"],
 	["/requests/new", "Create Request", "Create Request"],
@@ -60,6 +68,14 @@ for (const [path, label, heading] of pages) {
 			assert.match(html, /aria-label="Available requests"/);
 			assert.match(html, />Refresh jobs<\/button>/);
 			assert.doesNotMatch(html, /Coming soon/);
+		} else if (path === "/my-requests") {
+			assert.match(html, /aria-label="Your requests"/);
+			assert.match(html, />Refresh requests<\/button>/);
+			assert.doesNotMatch(html, /Coming soon/);
+		} else if (path === "/my-deliveries") {
+			assert.match(html, /aria-label="Your deliveries"/);
+			assert.match(html, />Refresh deliveries<\/button>/);
+			assert.doesNotMatch(html, /Coming soon/);
 		} else if (path !== "/") {
 			assert.match(html, /Coming soon/);
 			assert.doesNotMatch(html, /<form[\s>]/);
@@ -105,6 +121,8 @@ test("available-job cards match the live API fields, order, and detail links", a
 		assert.equal(job.status, "OPEN");
 		const card = cards[index];
 		assert.ok(card.includes(`href="/requests/${job.id}"`));
+		assert.ok(card.includes(`data-status="${job.status}"`));
+		assert.ok(card.includes(`</span>${statusLabels[job.status]}</span>`));
 		for (const text of [
 			labels[job.category],
 			job.title,
@@ -204,3 +222,157 @@ test("acceptance proxy preserves helper validation without mutating a request", 
 	assert.equal(error.message, "Validation failed.");
 	assert.equal(typeof error.fields.helperId, "string");
 });
+
+test("customer tracking cards match every live API request in order", async () => {
+	const requests = await apiRequest("/users/1/requests");
+	const response = await fetch(`${baseUrl}/my-requests`, {
+		signal: AbortSignal.timeout(15000),
+	});
+	assert.equal(response.status, 200);
+	const html = (await response.text()).replaceAll(/<!--.*?-->/gs, "");
+	const cards =
+		html.match(/<a\b[^>]*class="job-card"[^>]*>[\s\S]*?<\/a>/g) ?? [];
+	assert.equal(cards.length, requests.length);
+	if (!requests.length) assert.match(html, /No requests yet/);
+	const labels = {
+		PACKAGE: "Package delivery",
+		BUY: "Shopping",
+		PICKUP: "Pickup",
+	};
+	const escape = (value) =>
+		String(value)
+			.replaceAll("&", "&amp;")
+			.replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;")
+			.replaceAll('"', "&quot;")
+			.replaceAll("'", "&#x27;");
+	for (const [index, request] of requests.entries()) {
+		assert.equal(request.customerId, 1);
+		const card = cards[index];
+		assert.ok(card.includes(`href="/requests/${request.id}"`));
+		assert.ok(card.includes(`data-status="${request.status}"`));
+		assert.ok(card.includes(`</span>${statusLabels[request.status]}</span>`));
+		for (const value of [
+			request.title,
+			labels[request.category],
+			request.status,
+			request.helperId === null
+				? "No helper assigned"
+				: `Helper #${request.helperId}`,
+			formatOsloDate(request.deadline),
+		])
+			assert.ok(
+				card.includes(escape(value)),
+				`Missing ${value} for request ${request.id}`,
+			);
+		assert.equal(
+			card.match(/<time\b[^>]*datetime="([^"]+)"/i)?.[1],
+			request.deadline,
+		);
+	}
+	assert.doesNotMatch(html, />Accept Job<\/button>|>Mark Delivered<\/button>/);
+});
+
+test("customer tracking is available through the same-origin proxy", async () => {
+	const requests = await apiRequest("/users/1/requests");
+	const response = await fetch(`${baseUrl}/backend-api/users/1/requests`);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), requests);
+});
+
+for (const [id, status] of [
+	["0", 422],
+	["9223372036854775807", 404],
+]) {
+	test(`customer tracking preserves ${status} errors through the proxy`, async () => {
+		const response = await fetch(`${baseUrl}/backend-api/users/${id}/requests`);
+		assert.equal(response.status, status);
+		const error = await response.json();
+		assert.equal(error.status, status);
+		assert.equal(typeof error.message, "string");
+		if (status === 404) assert.equal(error.message, "Customer not found.");
+	});
+}
+
+test("helper delivery cards match assigned jobs and expose only the appropriate next step", async () => {
+	const deliveries = await apiRequest("/users/2/deliveries");
+	const response = await fetch(`${baseUrl}/my-deliveries`, {
+		signal: AbortSignal.timeout(15000),
+	});
+	assert.equal(response.status, 200);
+	const html = (await response.text()).replaceAll(/<!--.*?-->/gs, "");
+	const cards =
+		html.match(
+			/<article\b[^>]*data-request-id="\d+"[^>]*>[\s\S]*?<\/article>/g,
+		) ?? [];
+	assert.equal(cards.length, deliveries.length);
+	if (!deliveries.length) assert.match(html, /No deliveries yet/);
+	const labels = {
+		PACKAGE: "Package delivery",
+		BUY: "Shopping",
+		PICKUP: "Pickup",
+	};
+	const actions = {
+		ACCEPTED: "Mark Picked Up",
+		PICKED_UP: "Start Delivery",
+		DELIVERING: "Mark Delivered",
+	};
+	const escape = (value) =>
+		String(value)
+			.replaceAll("&", "&amp;")
+			.replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;")
+			.replaceAll('"', "&quot;")
+			.replaceAll("'", "&#x27;");
+	for (const [index, request] of deliveries.entries()) {
+		assert.equal(request.helperId, 2);
+		const card = cards[index];
+		assert.ok(card.includes(`data-request-id="${request.id}"`));
+		assert.ok(card.includes(`href="/requests/${request.id}"`));
+		assert.ok(card.includes(`data-status="${request.status}"`));
+		assert.ok(card.includes(`</span>${statusLabels[request.status]}</span>`));
+		for (const value of [
+			request.title,
+			labels[request.category],
+			request.status,
+			request.pickupAddress,
+			request.deliveryAddress,
+			`${request.helperReward} NOK`,
+			formatOsloDate(request.deadline),
+		]) {
+			assert.ok(
+				card.includes(escape(value)),
+				`Missing ${value} for delivery ${request.id}`,
+			);
+		}
+		const buttons = [...card.matchAll(/<button\b[^>]*>([^<]*)<\/button>/g)].map(
+			(x) => x[1],
+		);
+		assert.deepEqual(
+			buttons,
+			actions[request.status] ? [actions[request.status]] : [],
+		);
+	}
+});
+
+test("helper delivery list is available through the same-origin proxy", async () => {
+	const deliveries = await apiRequest("/users/2/deliveries");
+	const response = await fetch(`${baseUrl}/backend-api/users/2/deliveries`);
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), deliveries);
+});
+
+for (const [id, status] of [
+	["0", 422],
+	["9223372036854775807", 404],
+]) {
+	test(`helper delivery list preserves ${status} errors through the proxy`, async () => {
+		const response = await fetch(
+			`${baseUrl}/backend-api/users/${id}/deliveries`,
+		);
+		assert.equal(response.status, status);
+		const error = await response.json();
+		assert.equal(error.status, status);
+		if (status === 404) assert.equal(error.message, "Helper not found.");
+	});
+}

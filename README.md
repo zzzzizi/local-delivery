@@ -1,6 +1,6 @@
-# Local Delivery — Stage 14 request details and acceptance complete
+# Local Delivery — Stage 17 complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Backend features through Stage 10 and frontend Stages 11–14 are complete, including request creation, available jobs, request details, and job acceptance. Stage 15 (My Requests) has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Stages 1–17 are complete, including request creation, available jobs, details, acceptance, customer request tracking, the helper delivery workflow, and basic UI improvements. The application is working and tested against PostgreSQL and in the browser. Stage 18 has not been started.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -14,13 +14,19 @@ Stage 9 adds the status PATCH endpoint and centralized transitions through picku
 
 Stage 10 adds an explicit already-accepted exception and a consistent JSON error contract for business errors, validation, Spring MVC request errors, and unexpected server failures. Protocol headers and field validation details are preserved; internal exception details stay out of responses.
 
-Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. Create Request and Available Jobs are now implemented. My Requests and My Deliveries still show “Coming soon”; tracking remains for later stages. Authentication, payments, GPS, and chat also remain out of scope.
+Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. Create Request, Available Jobs, and My Requests are now implemented. My Deliveries now runs the completed Stage 16 helper workflow. Authentication, payments, GPS, and chat also remain out of scope.
 
 Stage 12 adds the eight-field Create Request form, posts as customer 1, prevents duplicate submissions while pending, shows client/backend validation and server errors, and displays the saved request after success. Deadline entry and display use Oslo time.
 
 Stage 13 fetches OPEN requests and displays linked cards with category, title, addresses, reward, Oslo deadline, and status. Loading, empty results, API errors, and refresh/retry are handled. Card destinations now open the Stage 14 detail page.
 
 Stage 14 displays complete request details and accepts OPEN jobs as helper 2. It refreshes after acceptance, handles already-accepted conflicts, prevents duplicate submissions while pending, and provides loading, retry, not-found, and manual-refresh states.
+
+Stage 15 adds `GET /api/users/{userId}/requests` and a working My Requests page for customer 1. It displays requests in every status, newest first, with category, title, status, assigned helper, and Oslo deadline. Refresh, loading, empty results, API errors, and retry are handled.
+
+Stage 16 adds helper delivery listing and the three delivery-status actions. All 276 backend tests and 126 frontend tests pass, along with lint, TypeScript, and the production build. Browser checks verify the full delivery workflow, conflicts, duplicate-click prevention, refresh recovery, and mobile layout; see Stage 16 below.
+
+Stage 17 improves navigation, responsive cards, status badges, form grouping, loading placeholders, empty states, and error feedback using the existing CSS and React components. All automated checks pass, with browser verification at desktop, tablet, and phone widths.
 
 ## Stack and architecture
 
@@ -46,7 +52,8 @@ local-delivery/
 │       ├── main/
 │       │   ├── java/com/localdelivery/
 │       │   │   ├── LocalDeliveryApplication.java
-│       │   │   ├── controller/  HealthController, DeliveryRequestController
+│       │   │   ├── controller/  HealthController, DeliveryRequestController,
+│       │   │   │                UserRequestController, UserDeliveryController
 │       │   │   ├── service/     DeliveryRequestService, DemoUserService
 │       │   │   ├── repository/  UserRepository, DeliveryRequestRepository
 │       │   │   ├── model/       User, DeliveryRequest, RequestCategory, DeliveryStatus
@@ -67,6 +74,8 @@ local-delivery/
 │       │           └── V3__request_optimistic_locking.sql
 │       └── test/java/com/localdelivery/
 │           ├── DeliveryApiTest.java
+│           ├── CustomerRequestsApiTest.java
+│           ├── HelperDeliveriesApiTest.java
 │           ├── AcceptRequestApiTest.java
 │           ├── UpdateStatusApiTest.java
 │           ├── LegacyMigrationTest.java
@@ -87,10 +96,13 @@ local-delivery/
     │   │   ├── my-requests/page.tsx
     │   │   └── my-deliveries/page.tsx
     │   ├── components/  navigation.tsx, page-shell.tsx, create-request-form.tsx,
-    │   │                available-jobs.tsx, refresh-jobs-button.tsx, request-details.tsx
-    │   └── lib/         api.ts, api-config.mjs, create-request.ts, available-jobs.ts, request-details.ts
+    │   │                available-jobs.tsx, refresh-jobs-button.tsx, request-details.tsx,
+    │   │                customer-requests.tsx, refresh-requests-button.tsx, delivery-board.tsx
+    │   └── lib/         api.ts, api-config.mjs, create-request.ts, available-jobs.ts,
+    │                    request-details.ts, customer-requests.ts, helper-deliveries.ts
     └── tests/           api.test.mjs, create-request.test.mjs, available-jobs.test.mjs,
-                         request-details.test.mjs, home.test.mjs
+                         request-details.test.mjs, customer-requests.test.mjs,
+                         helper-deliveries.test.mjs, home.test.mjs
 ```
 
 ## Prerequisites
@@ -184,6 +196,8 @@ Old URLs and snake_case request bodies are not compatibility aliases. Refresh ol
 | `POST /api/requests` | 201, saved request with `status: "OPEN"` and `helperId: null` |
 | `GET /api/requests` | 200, array of OPEN requests, newest first; descending ID breaks timestamp ties |
 | `GET /api/requests/{id}` | 200, complete request regardless of status; 404 if missing |
+| `GET /api/users/{userId}/requests` | 200, all requests created by that customer, newest first; empty array if none; 404 if customer is missing |
+| `GET /api/users/{userId}/deliveries` | All jobs assigned to that helper, newest first; empty array if none; 404 if helper is missing |
 | `POST /api/requests/{id}/accept` | 200, complete accepted request with the chosen helper; 409 if no longer available |
 | `PATCH /api/requests/{id}/status` | 200, complete updated request; 409 for invalid transitions or concurrent changes |
 
@@ -253,7 +267,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=DeliveryApiTest test
 ```
 
-The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 250 cases, including the separate acceptance, status-update, and error-contract suites.
+The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 276 cases, including the separate acceptance, status-update, error-contract, customer-tracking, and helper-delivery suites.
 
 ## Stage 7 listing and detail verification
 
@@ -476,10 +490,10 @@ The application now has five routes:
 | Create Request | `/requests/new` | Working form and saved confirmation (Stage 12) |
 | Available Jobs | `/jobs` | Live OPEN request cards, refresh/retry, empty/error/loading states (Stage 13) |
 | Request Details | `/requests/{id}` | Complete details, accept as helper 2, conflicts, refresh/retry (Stage 14) |
-| My Requests | `/my-requests` | Page shell; customer tracking comes in Stage 15 |
-| My Deliveries | `/my-deliveries` | Page shell; helper workflow comes in Stage 16 |
+| My Requests | `/my-requests` | Customer 1’s requests in every status, helper, deadline, refresh/retry (Stage 15) |
+| My Deliveries | `/my-deliveries` | Helper 2’s assigned jobs and next status actions |
 
-All pages share the root layout, header, navigation, and footer. Navigation uses Next.js `Link` and `usePathname`, with `aria-current="page"` on the active item. Links wrap on narrow screens; keyboard users can skip directly to the main content. Each feature page has its own document title. Stage 11 introduced page shells; Stages 12 and 13 implement Create Request and Available Jobs. My Requests and My Deliveries retain their availability notices.
+All pages share the root layout, header, navigation, and footer. Navigation uses Next.js `Link` and `usePathname`, with `aria-current="page"` on the active item. Links wrap on narrow screens; keyboard users can skip directly to the main content. Each feature page has its own document title. Stage 11 introduced page shells; Stages 12 and 13 implement Create Request and Available Jobs. Stage 15 implements My Requests; Stage 16 implements My Deliveries and its verified status workflow.
 
 Configure the backend once in `frontend/.env.local`:
 
@@ -530,7 +544,7 @@ To test the production build, stop any running frontend, run `npm run start`, an
 Manual testing:
 
 1. Open [Home](http://127.0.0.1:3000/). Click each of the five navigation links. Confirm its heading, document title, and active underline change.
-2. Refresh each route directly. All should load successfully with the same navigation. Create Request should show its form, Available Jobs should load request cards, and My Requests/My Deliveries should display “Coming soon”.
+2. Refresh each route directly. All should load successfully with the same navigation. Create Request should show its form, Available Jobs should load OPEN request cards, My Requests should load customer 1’s requests in all statuses, and My Deliveries should load helper 2’s assigned jobs and status controls.
 3. On Home, click **Create a request** and **View available jobs**; confirm they reach `/requests/new` and `/jobs` respectively. Use the **Home** navigation link to return.
 4. Use Tab to focus **Skip to content**, then Enter. Focus should move to the main content. At a narrow mobile width, confirm navigation wraps and buttons remain usable without horizontal scrolling.
 5. Open [proxied health](http://127.0.0.1:3000/backend-api/health). Expect `{"status":"ok"}` from the Java backend.
@@ -647,7 +661,7 @@ const data = await apiRequest<unknown>(`/requests/${id}/accept`, {
 const current = await fetchRequest(id);
 ```
 
-The dynamic route awaits Next.js's promised `params`; its async loader uses `connection()` inside `Suspense`. The existing API helper supplies no-store requests and a ten-second timeout. The client component owns only the displayed request and acceptance/refresh state. No backend endpoint, schema, or dependency change was needed. `allowImportingTsExtensions` lets the workflow import the same API module in both Next.js and Node's native TypeScript tests. Helper 2 remains the planned MVP identity; authentication and Stage 15 tracking are not implemented.
+The dynamic route awaits Next.js's promised `params`; its async loader uses `connection()` inside `Suspense`. The existing API helper supplies no-store requests and a ten-second timeout. The client component owns only the displayed request and acceptance/refresh state. No backend endpoint, schema, or dependency change was needed. `allowImportingTsExtensions` lets the workflow import the same API module in both Next.js and Node's native TypeScript tests. Helper 2 remains the planned MVP identity; authentication is not implemented. Customer tracking is available in Stage 15 below.
 
 Manual Stage 14 verification:
 
@@ -661,6 +675,153 @@ Manual Stage 14 verification:
 8. For fault checks, use an isolated fake API and a second frontend with a different `NEXT_PUBLIC_API_URL`. Check initial GET 503 → Try again → recovery; delayed POST with double-click → one POST; POST 409 followed by GET 503 → acceptance blocked until Refresh succeeds; and POST 200 followed by GET 503 → saved ACCEPTED details remain visible. Do not alter existing database records to simulate failures.
 
 Automated checks: `npm run lint`, `npm run typecheck`, `npm run test:unit` (**74 cases**), `npm run build`, `npm test` with both servers running (**87 cases**), and `./mvnw test` in `backend` (**250 cases**). The 22 new unit cases cover the detail contract, IDs, successful acceptance and refresh, conflicts, uncertain outcomes, saved-response fallback, and business errors. Four added live tests cover the detail route, missing/invalid IDs, and proxied acceptance validation without mutations.
+
+## Stage 15 — My Requests
+
+Open [My Requests](http://127.0.0.1:3000/my-requests). The page uses `GET /api/users/1/requests`, with customer 1 as the planned MVP identity. It shows every request created by that customer, including OPEN, ACCEPTED, PICKED_UP, DELIVERING, DELIVERED, and CANCELLED. Each linked card displays title, category, status, helper ID (or **No helper assigned**), and deadline in Oslo time. Helper IDs reuse the existing response DTO; there is no new user-profile endpoint.
+
+The backend filters by the **customer relationship**, not by helper or status, and orders by `createdAt DESC, id DESC`. Existing customers with no requests receive `200 []`; unknown customers receive `404 Customer not found.` Invalid, nonpositive, or out-of-range path IDs receive the established 422 error format. Controllers return the existing complete `DeliveryRequestResponse` DTO. Reads do not change records. The new endpoint also appears in Swagger/OpenAPI. This remains the unauthenticated MVP; customer IDs are not an authorization mechanism.
+
+Important backend code:
+
+```java
+@Transactional(readOnly = true)
+public List<DeliveryRequestResponse> listByCustomer(Long customerId) {
+    if (!users.existsById(customerId)) {
+        throw new ResourceNotFoundException("Customer not found.");
+    }
+    return requests.findByCustomer_IdOrderByCreatedAtDescIdDesc(customerId)
+            .stream().map(DeliveryRequestResponse::from).toList();
+}
+```
+
+The page uses a server component inside `Suspense`, with `connection()` keeping API requests out of build-time rendering. The existing helper uses `cache: "no-store"` and a ten-second timeout. **Refresh requests** calls `router.refresh()` in a transition and disables itself until the fetch completes. An empty array displays **No requests yet** and a link to Create Request. Failed requests show an error and **Try again**. The response guard rejects malformed records, duplicate IDs, and records belonging to another customer rather than displaying an incorrect list. The existing card styles provide two desktop columns and one mobile column.
+
+```tsx
+const response = await apiRequest<unknown>("/users/1/requests");
+if (!isCustomerRequests(response)) {
+  throw new ApiError(502, "The server returned invalid request data. Please try again.");
+}
+```
+
+Manual Stage 15 verification:
+
+1. Start PostgreSQL, the updated Java backend, and frontend using the commands above. If running an executable JAR, stop the old process, run `./mvnw package` in `backend`, then restart it. For production frontend use, stop the old process, run `npm run build`, then `npm run start` in `frontend`.
+2. Open [My Requests](http://127.0.0.1:3000/my-requests) from the navigation. Compare the count, order, IDs, and fields with [customer 1’s API response](http://127.0.0.1:8080/api/users/1/requests). At verification, there are **10** customer-1 requests: five OPEN, two ACCEPTED, one DELIVERED, and two CANCELLED.
+3. Confirm request 12 displays ACCEPTED and **Helper #2**, request 11 shows OPEN and **No helper assigned**, and the completed/cancelled requests remain visible. Compare [customer 2’s API response](http://127.0.0.1:8080/api/users/2/requests); its request 7 must not appear on customer 1’s page, even though customer 1 is that request’s helper.
+4. Click **Refresh requests**. The button shows **Refreshing…** while pending, then the latest status/helper data appears. A fast local response can make this brief. Use Tab and Enter on a card to open its Stage 14 detail page, then return through My Requests navigation.
+5. At 390px width, expect one column with wrapping titles and deadlines, usable controls, and no horizontal scrolling.
+6. In Swagger, call `GET /api/users/{userId}/requests` with `9223372036854775807` and expect 404; use `0` and expect 422. The isolated backend tests verify `200 []` for an existing customer who has no requests.
+7. For empty/loading/failure checks without modifying saved records, run a separate fake API and a temporary frontend on another port with its own `NEXT_PUBLIC_API_URL`. Test `[]`, a delayed response, a 503, malformed/mixed-owner data, and a response delayed beyond ten seconds. Expect the matching empty/loading/error state, then recover using **Try again** when valid data returns. Change a fixture’s status/helper and use Refresh to verify fresh data is displayed.
+
+Validation commands: `npm run lint`, `npm run typecheck`, `npm run test:unit` (**80 tests**), `npm run build`, `npm test` with both servers running (**97 tests: 80 unit + 17 live**), and `./mvnw test` (**263 tests**). The 13 new backend cases cover ownership, all categories/statuses, nullable helpers, complete DTOs, empty/missing customers, invalid IDs, ordering, read-only behavior, and committed workflow updates. Six new frontend unit cases cover the tracking contract; four new live cases check rendered cards and proxied data/errors. Stage 16 helper actions are described below; they were not part of this Stage 15 verification.
+
+## Stage 16 — My Deliveries (complete)
+
+Implemented and verified: `GET /api/users/{userId}/deliveries`, a helper-filtered repository query, and the My Deliveries page for MVP helper 2. The endpoint returns complete DTOs ordered by `createdAt DESC, id DESC`, including assigned completed/cancelled requests. It excludes unassigned requests and jobs assigned to other helpers. Missing helpers return 404; invalid path IDs return 422. The existing status PATCH endpoint and transition rules are reused. No schema migration, dependency, authentication, or UI-polish work was added during Stage 16.
+
+The page shows title, category, status, description, pickup/delivery addresses, reward, Oslo deadline, and a detail link. Next steps are:
+
+| Current status | Button | PATCH status |
+| --- | --- | --- |
+| ACCEPTED | Mark Picked Up | PICKED_UP |
+| PICKED_UP | Start Delivery | DELIVERING |
+| DELIVERING | Mark Delivered | DELIVERED |
+| DELIVERED or CANCELLED | No action | None |
+
+The server fetch streams a loading message and provides retry after initial errors. The client board refreshes assigned jobs after an update, disables controls while a request is pending, and focuses feedback. Empty lists link to Available Jobs. A synchronous guard prevents duplicate submissions while pending. Conflicts and uncertain responses trigger a GET instead of an automatic PATCH retry. A saved update remains visible if its follow-up GET fails; further updates stay blocked until Refresh deliveries succeeds. Unexpected or foreign-helper data is rejected.
+
+Important code:
+
+```java
+@Transactional(readOnly = true)
+public List<DeliveryRequestResponse> listByHelper(Long helperId) {
+    if (!users.existsById(helperId)) {
+        throw new ResourceNotFoundException("Helper not found.");
+    }
+    return requests.findByHelper_IdOrderByCreatedAtDescIdDesc(helperId)
+            .stream().map(DeliveryRequestResponse::from).toList();
+}
+```
+
+```ts
+const action = deliveryAction(request);
+if (!action) return;
+// Only a valid next action for helper 2 can reach this mutation:
+const data = await apiRequest<unknown>(`/requests/${request.id}/status`, {
+  method: "PATCH",
+  body: { status: action.status },
+});
+// Validate the saved response, then refresh the helper's list.
+const deliveries = await fetchDeliveries();
+```
+
+Verification completed on **2026-10-23** (automated tests ran on October 22):
+
+- `./mvnw test`: **276 tests passed**, zero failures, errors, or skips, using isolated PostgreSQL test schemas. The 13 new cases cover helper filtering, complete DTOs, categories, terminal states, empty/missing helpers, invalid IDs, ordering, read-only behavior, customer tracking, and stale transitions.
+- Frontend lint and TypeScript passed. `npm run build` passed in the working repository. `npm test` passed **126 tests: 105 unit + 21 live**, including 25 new workflow unit cases and four new live cases. Unit coverage includes timeout/network reconciliation, invalid responses, conflicts, and failed refreshes.
+- Packaged and restarted the updated Java backend and production frontend. The new endpoint appears in OpenAPI. The page displays all five helper-2 assignments and excludes other helpers’ jobs; completed/cancelled cards have no status action.
+- Browser verification used only the new labelled demo request **#13**: accept as helper 2, **Mark Picked Up → Start Delivery → Mark Delivered**, then reload. The delivered status also appears on My Requests. A second stale tab received the expected 409, refreshed its saved state, and did not overwrite it. Feedback received keyboard focus.
+- Verified keyboard refresh and detail navigation, active navigation, and the **390px** mobile layout without horizontal overflow. The production tab reported no browser warnings or errors.
+- An isolated fake API verified empty results, loading, initial 503 errors and retry recovery, disabled controls during a delayed update, and one PATCH despite a double-click. A successful PATCH followed by a failed GET retained the saved status and disabled further updates until manual refresh succeeded. A lost update response was reconciled from the latest list without repeating the PATCH. Both temporary test servers were stopped.
+- Before/after PostgreSQL snapshots confirm all **two users and eleven pre-existing requests are unchanged**, including timestamps and versions. Only demo #13 was added; it is assigned to helper 2, DELIVERED, version 4. No schema migration or dependency was added. This completed the Stage 16 checkpoint before the Stage 17 UI work.
+
+To test Stage 16 manually:
+
+1. In `backend`, run `./mvnw test`. After it passes, stop any previous Java process, run `./mvnw -DskipTests package`, and start `java -jar target/local-delivery-0.1.0.jar --spring.profiles.active=dev`.
+2. Stop any previous frontend process, then in `frontend` run `npm run build`, `npm run start`, and in another terminal `npm test`. Open [My Deliveries](http://127.0.0.1:3000/my-deliveries) and compare its cards with [helper 2’s list](http://127.0.0.1:8080/api/users/2/deliveries). Existing delivered/cancelled cards must have no action button; jobs assigned to helper 1 must be absent.
+3. Create one clearly labelled demo request with a future deadline and accept it as helper 2. Use only this new record for mutation checks. Open My Deliveries in two tabs before changing it.
+4. In the first tab, use **Mark Picked Up**, **Start Delivery**, then **Mark Delivered**, one at a time. Verify each saved status, the next button, and the matching status on My Requests. After DELIVERED, the card stays visible without an action button. Reload to confirm persistence.
+5. In the stale second tab, attempt its old action. Expect a 409 message, refreshed saved status, and no overwritten state or automatic mutation retry.
+6. Check refresh, keyboard operation, focused feedback, and the 390px mobile layout. Use an isolated fake API for delayed updates/double-clicks, empty lists, initial errors, conflicts, timeout/lost-response reconciliation, and successful PATCH followed by failed GET. Further actions must remain disabled until a successful refresh when the saved state is uncertain.
+7. Compare before/after database snapshots: all pre-existing users and requests must remain unchanged, with only the labelled new demo advancing through the workflow. Stop temporary test servers.
+
+## Stage 17 — Basic UI Improvements (complete)
+
+The existing green-and-cream interface now has a clearer navigation bar, smaller headings on working pages, consistent rounded cards, and better spacing. The home welcome keeps its larger heading. On narrow screens, navigation becomes a two-column grid, cards and form fields stack, and action buttons fill the available width.
+
+A shared `StatusBadge` displays **Open, Accepted, Picked up, Delivering, Delivered,** or **Cancelled** with a distinct background and readable text. The API enum is retained in `data-status`; screen readers receive “Status:” before the label. Color is not the only indicator. All five card surfaces use the same component: available jobs, customer requests, helper deliveries, request details, and creation confirmation.
+
+The Create Request form is grouped into **What do you need?**, **Where is it going?**, and **Budget & timing**, with visible labels and hints. Required/optional behavior and submission logic are unchanged. Invalid fields have stronger borders, associated error messages, and the existing focused error summary. Loading views share a labelled spinner and decorative placeholder lines; reduced-motion CSS disables the spinner animation. Empty results and API errors use consistent panels with their existing next-step/retry controls.
+
+Important code:
+
+```tsx
+<StatusBadge status={request.status} />
+<Suspense fallback={<LoadingState message="Loading your deliveries…" />}>
+  <Deliveries />
+</Suspense>
+```
+
+```css
+.status-badge[data-status="DELIVERED"] {
+  background: #e4f1e4;
+  color: #2e653a;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-indicator { animation: none; }
+}
+```
+
+Verification on **2026-10-23**:
+
+- `npm run lint`, `npm run typecheck`, `npm run test:unit` (**105 passed**), `npm run build`, and `npm test` (**126 passed: 105 unit + 21 live**) all passed. Existing card checks now verify both API status values and readable badge labels.
+- `./mvnw test`: **276 passed**, zero failures, errors, or skips. Stage 17 does not change backend code or APIs.
+- The production frontend was rebuilt and restarted. Browser checks covered all five navigation pages and request details, keyboard refresh/detail links, active navigation, 320px and 390px phone layouts, and a 768px tablet layout. No horizontal overflow was found; tested navigation links and form controls had at least 44px height.
+- Submitting an incomplete form preserved the entered title, marked the six remaining required fields, linked each field to its error, and focused the alert. No request was created.
+- An isolated fake API verified all six badges (text contrast **5.75:1–6.77:1**), the streamed loading placeholder and status announcement, disabled refresh while pending, empty results, mobile 503-error feedback, and successful retry. Both temporary test servers were stopped. The production tab reported no browser warnings or errors.
+- A database snapshot matches the completed Stage 16 snapshot exactly: **2 users and 12 requests unchanged**, including timestamps and versions. No package, UI framework, schema migration, or new business workflow was added. Stage 18 has not been started.
+
+Manual testing:
+
+1. Open [Home](http://127.0.0.1:3000/) and visit every navigation link. The selected page should have a dark green tab and a matching heading. Use Tab and Enter to check keyboard navigation and the Skip to content link.
+2. Open [Create Request](http://127.0.0.1:3000/requests/new). Check its three sections. Enter a title only, then click **Post request**. Expect a focused error summary, errors for the other six required fields, and the title still present. This does not create data.
+3. Open [Available Jobs](http://127.0.0.1:3000/jobs), [My Requests](http://127.0.0.1:3000/my-requests), and [My Deliveries](http://127.0.0.1:3000/my-deliveries). Check card spacing, readable status badges, deadlines, and detail links. Delivered/cancelled cards must still have no status-update button.
+4. Resize to 320px, 390px, and 768px. Check that navigation remains usable, cards/fields stack on phones, buttons fit, and the page does not scroll horizontally.
+5. Use **Refresh jobs**, **Refresh requests**, or **Refresh deliveries**. On a delayed response, the refresh control becomes disabled. For initial page loads with a slow API, expect a labelled loading placeholder. With OS reduced-motion enabled, its spinner should stay still.
+6. To inspect empty/error states without changing database records, run a separate local frontend against a fake API returning `[]` or HTTP 503. Expect a helpful empty panel or error panel with recovery controls; restore valid data and retry. Keep the production API configuration unchanged.
+
+Stage 17 is complete. Stop before Stage 18 until requested.
 
 ## Manual creation and viewing tests
 
@@ -726,7 +887,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 250 tests cover health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, consistent business/validation/framework/server errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
+The 276 tests cover helper-only delivery listing, customer-only request tracking across every status, deterministic ordering, tracking after acceptance/delivery updates, health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, consistent business/validation/framework/server errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -759,7 +920,9 @@ Stage 12 verification on 2026-10-20 passed frontend lint, TypeScript checking, t
 
 Stage 13 verification on 2026-10-20 passed frontend lint, TypeScript checking, the production build, all 61 frontend tests, and all 250 backend regression tests. The production jobs page displays five real OPEN requests. Browser checks exercised refresh, loading, empty results, a 503 error, invalid response handling, retry recovery, timeout handling, zero reward, summer Oslo time, card links, and the 390px mobile layout without horizontal overflow. Failure/empty checks used a temporary isolated API and frontend; both temporary servers were stopped afterward. Before/after database snapshots confirmed all two users and ten requests were identical, including timestamps and versions. No records were created or changed. No backend source, schema migration, or dependency change was required.
 
-Stage 14 verification on 2026-10-21 passed frontend lint, TypeScript checking, the production build, all 87 frontend tests (74 unit and 13 live), and all 250 backend regression tests, with zero failures or skips. Browser checks verified real acceptance, a stale-tab 409, refresh, persisted helper assignment, removal from Available Jobs, not-found handling, keyboard feedback focus, and the 390px layout without horizontal overflow. An isolated temporary API/frontend also verified loading, initial 503/retry recovery, exactly one POST per double-click, a conflict with failed refresh, manual recovery, and a successful POST with a failed follow-up GET. Both temporary servers were stopped. The production acceptance tab had no browser warnings or errors. Request **12**, **Stage 14 verification — groceries**, is the only added development record and is ACCEPTED by helper 2 with version 1. Database snapshots confirmed all two users and ten pre-existing requests remained exactly unchanged, including timestamps and versions. Stage 15 has not been started.
+Stage 14 verification on 2026-10-21 passed frontend lint, TypeScript checking, the production build, all 87 frontend tests (74 unit and 13 live), and all 250 backend regression tests, with zero failures or skips. Browser checks verified real acceptance, a stale-tab 409, refresh, persisted helper assignment, removal from Available Jobs, not-found handling, keyboard feedback focus, and the 390px layout without horizontal overflow. An isolated temporary API/frontend also verified loading, initial 503/retry recovery, exactly one POST per double-click, a conflict with failed refresh, manual recovery, and a successful POST with a failed follow-up GET. Both temporary servers were stopped. The production acceptance tab had no browser warnings or errors. Request **12**, **Stage 14 verification — groceries**, is the only added development record and is ACCEPTED by helper 2 with version 1. Database snapshots confirmed all two users and ten pre-existing requests remained exactly unchanged, including timestamps and versions. Stage 14 ended at this checkpoint; Stage 15 verification is recorded below.
+
+Stage 15 verification on 2026-10-21 passed frontend lint, TypeScript checking, the production build, all 97 frontend tests (80 unit and 17 live), and all 263 backend regression tests, with zero failures or skips. The rebuilt Java JAR and production frontend are running. Live checks verified customer filtering, complete DTOs, OpenAPI documentation, and the ten customer-1 cards against API data. Browser checks covered navigation, keyboard-operated detail links, active navigation, refresh, helper/deadline/status display, and 390px layouts without horizontal overflow. Isolated fixtures verified all six statuses, loading and disabled refresh, updated status/helper after refresh, empty results, 503 errors, invalid/mixed-owner payloads, ten-second timeout handling, and successful retry recovery. Both temporary servers were stopped; the production page reported no browser warnings or errors. Before/after PostgreSQL snapshots confirmed all two users and eleven requests were identical, including timestamps and versions. No development records were created or changed, and no schema migration or dependency was added. This was the completed Stage 15 checkpoint; the Stage 16 section records the subsequent helper-workflow verification.
 
 
 ## Important implementation examples
@@ -874,12 +1037,50 @@ Stage 14 files:
 - Updated `frontend/package.json` and `frontend/tsconfig.json`: native workflow test inclusion and TypeScript import support.
 - Updated `README.md`: scope, behavior, verification, manual steps, and changed files.
 
+Stage 15 files:
+
+- Added `backend/src/main/java/com/localdelivery/controller/UserRequestController.java`: validated customer request endpoint.
+- Updated `backend/src/main/java/com/localdelivery/service/DeliveryRequestService.java`: read-only customer lookup and DTO mapping.
+- Updated `backend/src/main/java/com/localdelivery/repository/DeliveryRequestRepository.java`: customer filter and deterministic newest-first order.
+- Added `backend/src/test/java/com/localdelivery/CustomerRequestsApiTest.java`: 13 PostgreSQL-backed endpoint tests.
+- Updated `frontend/src/app/my-requests/page.tsx`: working tracking page with loading boundary.
+- Added `frontend/src/components/customer-requests.tsx`: data fetch, cards, empty/error states.
+- Added `frontend/src/components/refresh-requests-button.tsx`: refresh/retry transition.
+- Added `frontend/src/lib/customer-requests.ts`: response and customer-ownership validation.
+- Added `frontend/tests/customer-requests.test.mjs`: six response-contract cases.
+- Updated `frontend/tests/home.test.mjs` and `frontend/package.json`: live tracking checks and unit-test inclusion.
+- Updated `README.md`: scope, endpoint behavior, code, file list, and verification steps. No dependency or schema change was required.
+
+Stage 16 files:
+
+- Added `backend/src/main/java/com/localdelivery/controller/UserDeliveryController.java`: helper delivery endpoint.
+- Updated `backend/src/main/java/com/localdelivery/service/DeliveryRequestService.java` and `repository/DeliveryRequestRepository.java`: read-only helper filtering and ordering.
+- Added `backend/src/test/java/com/localdelivery/HelperDeliveriesApiTest.java`: 13 endpoint and workflow cases.
+- Updated `frontend/src/app/my-deliveries/page.tsx`: server loading/error states and delivery board.
+- Added `frontend/src/components/delivery-board.tsx`: assigned-job cards, status actions, refresh, feedback, and duplicate-submit guard.
+- Added `frontend/src/lib/helper-deliveries.ts`: validation, action mapping, mutation, and reconciliation.
+- Added `frontend/tests/helper-deliveries.test.mjs`: 25 unit cases.
+- Updated `frontend/src/app/globals.css`, `frontend/package.json`, and `frontend/tests/home.test.mjs`: card layout, test inclusion, and live action/proxy checks.
+- Updated `README.md`: implementation details, successful verification, manual test steps, and commit suggestion. Earlier uncommitted Stage 15 work is preserved.
+
+Stage 17 files:
+
+- Added `frontend/src/components/status-badge.tsx`: shared readable labels and status-specific styling hooks.
+- Added `frontend/src/components/loading-state.tsx`: shared accessible loading placeholder.
+- Updated `frontend/src/app/globals.css`: navigation, typography, cards, badge colors, form sections, feedback panels, responsive layouts, reduced-motion and forced-color rules.
+- Updated `frontend/src/app/page.tsx`: home-specific heading treatment.
+- Updated `frontend/src/app/my-requests/page.tsx`, `frontend/src/app/my-deliveries/page.tsx`, and `frontend/src/app/requests/[id]/page.tsx`: shared loading state.
+- Updated `frontend/src/components/available-jobs.tsx`, `frontend/src/components/customer-requests.tsx`, `frontend/src/components/delivery-board.tsx`, and `frontend/src/components/request-details.tsx`: shared status badges; available jobs also uses the shared loading state.
+- Updated `frontend/src/components/create-request-form.tsx`: three labelled form sections and the shared confirmation badge.
+- Updated `frontend/tests/home.test.mjs`: verify readable status labels in the existing live card tests.
+- Updated `README.md`: scope, important code, verification, manual checks, file list, and commit suggestion. Earlier uncommitted Stage 15/16 work is preserved.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-feat: add job acceptance interface
+style: improve local delivery interface
 ```
 
-Stop here. Stage 15 (My Requests) will begin only when requested.
+Stage 17 is complete. Stop before Stage 18 until requested.

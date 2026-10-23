@@ -59,6 +59,24 @@ public class DeliveryRequestService {
                 .stream().map(DeliveryRequestResponse::from).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<DeliveryRequestResponse> listByCustomer(Long customerId) {
+        if (!users.existsById(customerId)) {
+            throw new ResourceNotFoundException("Customer not found.");
+        }
+        return requests.findByCustomer_IdOrderByCreatedAtDescIdDesc(customerId)
+                .stream().map(DeliveryRequestResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<DeliveryRequestResponse> listByHelper(Long helperId) {
+        if (!users.existsById(helperId)) {
+            throw new ResourceNotFoundException("Helper not found.");
+        }
+        return requests.findByHelper_IdOrderByCreatedAtDescIdDesc(helperId)
+                .stream().map(DeliveryRequestResponse::from).toList();
+    }
+
     @Transactional
     public DeliveryRequestResponse accept(Long id, AcceptRequestDto input) {
         var request = requests.findById(id)

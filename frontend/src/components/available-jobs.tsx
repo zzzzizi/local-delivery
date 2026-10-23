@@ -1,3 +1,5 @@
+import { LoadingState } from "./loading-state";
+import { StatusBadge } from "./status-badge";
 import Link from "next/link";
 import { connection } from "next/server";
 import { ApiError, apiRequest } from "../lib/api";
@@ -6,11 +8,7 @@ import { categoryLabels, formatOsloDate } from "../lib/create-request";
 import { RefreshJobsButton } from "./refresh-jobs-button";
 
 export function JobsLoading() {
-	return (
-		<div className="jobs-feedback" role="status">
-			<p>Loading available jobs…</p>
-		</div>
-	);
+	return <LoadingState message="Loading available jobs…" />;
 }
 
 export async function AvailableJobs() {
@@ -69,7 +67,7 @@ export async function AvailableJobs() {
 							>
 								<div className="request-card-heading">
 									<p className="eyebrow">{categoryLabels[job.category]}</p>
-									<span className="status-badge">{job.status}</span>
+									<StatusBadge status={job.status} />
 								</div>
 								<h2>{job.title}</h2>
 								<dl className="job-details">

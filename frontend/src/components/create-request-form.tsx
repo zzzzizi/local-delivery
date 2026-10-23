@@ -1,5 +1,6 @@
 "use client";
 
+import { StatusBadge } from "./status-badge";
 import {
 	type FormEvent,
 	type ReactNode,
@@ -139,7 +140,7 @@ export function CreateRequestForm() {
 				<article className="request-card" aria-label="Created request">
 					<div className="request-card-heading">
 						<p className="eyebrow">{categoryLabels[created.category]}</p>
-						<span className="status-badge">{created.status}</span>
+						<StatusBadge status={created.status} />
 					</div>
 					<h2>{created.title}</h2>
 					<p className="request-description">{created.description}</p>
@@ -214,86 +215,112 @@ export function CreateRequestForm() {
 			)}
 			<fieldset disabled={pending}>
 				<legend className="sr-only">Request details</legend>
-				<Field name="category" label="Category" error={errors.category}>
-					<select {...control("category")} required>
-						<option value="">Choose a category</option>
-						{Object.entries(categoryLabels).map(([value, label]) => (
-							<option key={value} value={value}>
-								{label}
-							</option>
-						))}
-					</select>
-				</Field>
-				<Field name="title" label="Title" error={errors.title}>
-					<input
-						{...control("title")}
-						required
-						maxLength={200}
-						placeholder="e.g. Pick up a parcel from the post office"
-					/>
-				</Field>
-				<Field
-					name="description"
-					label="Description"
-					hint="Include what needs collecting and any useful instructions."
-					error={errors.description}
-				>
-					<textarea {...control("description", true)} required rows={4} />
-				</Field>
-				<div className="form-grid">
-					<Field
-						name="pickupAddress"
-						label="Pickup address"
-						error={errors.pickupAddress}
-					>
-						<input {...control("pickupAddress")} required maxLength={500} />
+				<section className="form-section" aria-labelledby="request-about">
+					<h2 id="request-about">
+						<span className="form-step" aria-hidden="true">
+							01
+						</span>{" "}
+						What do you need?
+					</h2>
+					<Field name="category" label="Category" error={errors.category}>
+						<select {...control("category")} required>
+							<option value="">Choose a category</option>
+							{Object.entries(categoryLabels).map(([value, label]) => (
+								<option key={value} value={value}>
+									{label}
+								</option>
+							))}
+						</select>
 					</Field>
-					<Field
-						name="deliveryAddress"
-						label="Delivery address"
-						error={errors.deliveryAddress}
-					>
-						<input {...control("deliveryAddress")} required maxLength={500} />
-					</Field>
-					<Field
-						name="shoppingBudget"
-						label="Shopping budget (NOK, optional)"
-						hint="Leave blank if no purchase is needed."
-						error={errors.shoppingBudget}
-					>
+					<Field name="title" label="Title" error={errors.title}>
 						<input
-							{...control("shoppingBudget", true)}
-							inputMode="decimal"
-							placeholder="0.00"
-						/>
-					</Field>
-					<Field
-						name="helperReward"
-						label="Helper reward (NOK)"
-						hint="Use up to two decimal places. 0 is allowed."
-						error={errors.helperReward}
-					>
-						<input
-							{...control("helperReward", true)}
+							{...control("title")}
 							required
-							inputMode="decimal"
-							placeholder="0.00"
+							maxLength={200}
+							placeholder="e.g. Pick up a parcel from the post office"
 						/>
 					</Field>
-				</div>
-				<Field
-					name="deadline"
-					label="Deadline (Oslo time)"
-					hint="Choose a future date and time in Oslo."
-					error={errors.deadline}
-				>
-					<input
-						{...control("deadline", true)}
-						type="datetime-local"
-						required
-						step={60}
-					/>
-				</Field>
+					<Field
+						name="description"
+						label="Description"
+						hint="Include what needs collecting and any useful instructions."
+						error={errors.description}
+					>
+						<textarea {...control("description", true)} required rows={4} />
+					</Field>
+				</section>
+				<section className="form-section" aria-labelledby="request-route">
+					<h2 id="request-route">
+						<span className="form-step" aria-hidden="true">
+							02
+						</span>{" "}
+						Where is it going?
+					</h2>
+					<div className="form-grid">
+						<Field
+							name="pickupAddress"
+							label="Pickup address"
+							error={errors.pickupAddress}
+						>
+							<input {...control("pickupAddress")} required maxLength={500} />
+						</Field>
+						<Field
+							name="deliveryAddress"
+							label="Delivery address"
+							error={errors.deliveryAddress}
+						>
+							<input {...control("deliveryAddress")} required maxLength={500} />
+						</Field>
+					</div>
+				</section>
+				<section className="form-section" aria-labelledby="request-timing">
+					<h2 id="request-timing">
+						<span className="form-step" aria-hidden="true">
+							03
+						</span>{" "}
+						Budget & timing
+					</h2>
+					<div className="form-grid">
+						<Field
+							name="shoppingBudget"
+							label="Shopping budget (NOK, optional)"
+							hint="Leave blank if no purchase is needed."
+							error={errors.shoppingBudget}
+						>
+							<input
+								{...control("shoppingBudget", true)}
+								inputMode="decimal"
+								placeholder="0.00"
+							/>
+						</Field>
+						<Field
+							name="helperReward"
+							label="Helper reward (NOK)"
+							hint="Use up to two decimal places. 0 is allowed."
+							error={errors.helperReward}
+						>
+							<input
+								{...control("helperReward", true)}
+								required
+								inputMode="decimal"
+								placeholder="0.00"
+							/>
+						</Field>
+					</div>
+					<Field
+						name="deadline"
+						label="Deadline (Oslo time)"
+						hint="Choose a future date and time in Oslo."
+						error={errors.deadline}
+					>
+						<input
+							{...control("deadline", true)}
+							type="datetime-local"
+							required
+							step={60}
+						/>
+					</Field>
+				</section>
 				<button type="submit" className="button">
 					{pending ? "Posting request…" : "Post request"}
 				</button>

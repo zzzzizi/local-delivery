@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function HomePage() {
 	return (
-		<>
+		<div className="home-hero">
 			<p className="eyebrow">A little help, close to home.</p>
 			<h1>
 				What do you need
@@ -22,6 +22,6 @@ export default function HomePage() {
 				</Link>
 			</div>
 			<p className="home-note">Local errands. Neighbourly help.</p>
-		</>
+		</div>
 	);
 }

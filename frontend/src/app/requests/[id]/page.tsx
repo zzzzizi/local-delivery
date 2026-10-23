@@ -1,3 +1,4 @@
+import { LoadingState } from "../../../components/loading-state";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -47,13 +48,7 @@ export default function RequestDetailsPage(props: Props) {
 			<p className="intro">
 				See what’s needed and help a neighbour with their delivery.
 			</p>
-			<Suspense
-				fallback={
-					<p className="jobs-feedback" role="status">
-						Loading request details…
-					</p>
-				}
-			>
+			<Suspense fallback={<LoadingState message="Loading request details…" />}>
 				<Details {...props} />
 			</Suspense>
 		</>

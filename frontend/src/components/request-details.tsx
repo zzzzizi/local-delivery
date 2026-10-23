@@ -1,5 +1,6 @@
 "use client";
 
+import { StatusBadge } from "./status-badge";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
@@ -86,7 +87,7 @@ export function RequestDetails({
 					<p className="eyebrow">
 						Request #{request.id} · {categoryLabels[request.category]}
 					</p>
-					<span className="status-badge">{request.status}</span>
+					<StatusBadge status={request.status} />
 				</div>
 				<h2>{request.title}</h2>
 				<p className="request-description">{request.description}</p>
