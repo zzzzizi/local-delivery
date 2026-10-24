@@ -1,6 +1,6 @@
-# Local Delivery — Stage 17 complete
+# Local Delivery — Stage 18 complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Stages 1–17 are complete, including request creation, available jobs, details, acceptance, customer request tracking, the helper delivery workflow, and basic UI improvements. The application is working and tested against PostgreSQL and in the browser. Stage 18 has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Stages 1–18 are complete, including the customer/helper workflow, basic UI improvements, and full-workflow integration testing. The application is working and tested against PostgreSQL, over real HTTP, and in the browser. Stage 19 has not been started.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -27,6 +27,8 @@ Stage 15 adds `GET /api/users/{userId}/requests` and a working My Requests page 
 Stage 16 adds helper delivery listing and the three delivery-status actions. All 276 backend tests and 126 frontend tests pass, along with lint, TypeScript, and the production build. Browser checks verify the full delivery workflow, conflicts, duplicate-click prevention, refresh recovery, and mobile layout; see Stage 16 below.
 
 Stage 17 improves navigation, responsive cards, status badges, form grouping, loading placeholders, empty states, and error feedback using the existing CSS and React components. All automated checks pass, with browser verification at desktop, tablet, and phone widths.
+
+Stage 18 adds four real-HTTP integration cases and verifies the complete BUY journey in the browser, from creating a request to the customer seeing Delivered. All 280 backend tests and 126 frontend tests pass.
 
 ## Stack and architecture
 
@@ -267,7 +269,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=DeliveryApiTest test
 ```
 
-The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 276 cases, including the separate acceptance, status-update, error-contract, customer-tracking, and helper-delivery suites.
+The original API/model suite has 82 passing cases, including the Stage 7 checks below. To run only the three precision regression cases, use `./mvnw '-Dtest=DeliveryApiTest#creationResponseMatchesCommittedRecord' test`. The full backend suite now contains 280 cases, including acceptance, status-update, error-contract, customer-tracking, helper-delivery, and complete real-HTTP workflow suites.
 
 ## Stage 7 listing and detail verification
 
@@ -810,7 +812,7 @@ Verification on **2026-10-23**:
 - The production frontend was rebuilt and restarted. Browser checks covered all five navigation pages and request details, keyboard refresh/detail links, active navigation, 320px and 390px phone layouts, and a 768px tablet layout. No horizontal overflow was found; tested navigation links and form controls had at least 44px height.
 - Submitting an incomplete form preserved the entered title, marked the six remaining required fields, linked each field to its error, and focused the alert. No request was created.
 - An isolated fake API verified all six badges (text contrast **5.75:1–6.77:1**), the streamed loading placeholder and status announcement, disabled refresh while pending, empty results, mobile 503-error feedback, and successful retry. Both temporary test servers were stopped. The production tab reported no browser warnings or errors.
-- A database snapshot matches the completed Stage 16 snapshot exactly: **2 users and 12 requests unchanged**, including timestamps and versions. No package, UI framework, schema migration, or new business workflow was added. Stage 18 has not been started.
+- A database snapshot matches the completed Stage 16 snapshot exactly: **2 users and 12 requests unchanged**, including timestamps and versions. No package, UI framework, schema migration, or new business workflow was added. This completed the Stage 17 checkpoint before Stage 18 integration testing.
 
 Manual testing:
 
@@ -821,7 +823,62 @@ Manual testing:
 5. Use **Refresh jobs**, **Refresh requests**, or **Refresh deliveries**. On a delayed response, the refresh control becomes disabled. For initial page loads with a slow API, expect a labelled loading placeholder. With OS reduced-motion enabled, its spinner should stay still.
 6. To inspect empty/error states without changing database records, run a separate local frontend against a fake API returning `[]` or HTTP 503. Expect a helpful empty panel or error panel with recovery controls; restore valid data and retry. Keep the production API configuration unchanged.
 
-Stage 17 is complete. Stop before Stage 18 until requested.
+This completed the Stage 17 UI checkpoint.
+
+## Stage 18 — Integration Testing (complete)
+
+Added `DeliveryWorkflowIntegrationTest`, which starts Spring Boot on a random local port and uses Java’s HTTP client against the real controllers, services, repositories, migrations, and PostgreSQL database. Each run creates its own random test schema, checks that schema before resetting fixtures, and removes it afterward. Tests do not run inside a shared test transaction: fresh HTTP reads and direct SQL checks verify committed data.
+
+Four cases cover:
+
+- The complete journey for **BUY**, **PACKAGE**, and **PICKUP**: creation, OPEN listing and details, acceptance, assignment, pickup, delivery, completion, and customer tracking.
+- Rejected acceptance/status actions followed by successful recovery: bypassing helper assignment, accepting twice, skipping stages, repeating stale actions, and trying to move backward from DELIVERED. Failed actions must leave the stored row and every tracking view unchanged.
+
+Each successful step compares request details, Available Jobs, both customers’ request lists, and both helpers’ delivery lists. Control requests ensure unrelated jobs remain correctly filtered. The tests also check precise money values, unchanged request fields, timestamps, version increments, and untouched users/control rows.
+
+Important code:
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class DeliveryWorkflowIntegrationTest {
+    // HTTP requests exercise committed application transactions in an isolated schema.
+}
+```
+
+```java
+for (String next : new String[]{"PICKED_UP", "DELIVERING", "DELIVERED"}) {
+    JsonNode updated = update(id, next, 200);
+    assertStableFields(created, updated);
+    assertAllViews(updated, waiting, otherAssigned);
+    assertStored(updated, ++version);
+}
+```
+
+Verification completed on **2026-10-24** (test execution and browser workflow on October 23):
+
+- `./mvnw -Dtest=DeliveryWorkflowIntegrationTest test`: **4 passed**.
+- `./mvnw test`: **280 passed**, zero failures, errors, or skips.
+- `npm run lint`, `npm run typecheck`, and `npm test`: all passed; **126 frontend tests** (105 unit + 21 live). The previously verified production build remains current because Stage 18 changes only tests and documentation.
+- The browser completed all eleven required steps using **demo BUY request #14**: customer 1 opened Create Request and posted it; it appeared in Available Jobs; helper 2 opened and accepted it; it disappeared from OPEN jobs and appeared in My Deliveries; the helper marked Picked up, Delivering, and Delivered; customer 1 saw Delivered in My Requests.
+- The customer page was refreshed after each helper action and displayed the matching status. Reloading My Deliveries preserved Delivered with no remaining status-action button. Both browser tabs reported no warnings or errors.
+- The demo’s shopping budget is **325.75 NOK**, reward **80.50 NOK**, and deadline **15 January 2027 at 18:00 Oslo time**. Final API and PostgreSQL checks agree: BUY, customer 1, helper 2, DELIVERED, version 4.
+- Database snapshots confirm **all 2 users and 12 pre-existing requests are unchanged**, including timestamps and versions. Only the clearly labelled demo #14 was added. No application-code fix was needed; no schema, dependency, or API change was made. Stage 19 has not been started.
+
+Exact manual workflow:
+
+1. With the Java backend on port 8080 and frontend on port 3000, open [Create Request](http://127.0.0.1:3000/requests/new).
+2. Select **Shopping**. Use a new title such as `Stage 18 manual test — groceries`, description `Demo only; no real purchase or delivery is needed.`, pickup `Demo grocery shop, Oslo`, delivery `Demo home, Oslo`, shopping budget `325.75`, and reward `80.50`. Choose a future Oslo date/time with the native deadline control (for example 15 January 2027, 18:00 while that date remains in the future).
+3. Click **Post request**. Expect **Request created**, the new request number, an Open badge, and the entered amounts. Note the new ID; do not modify earlier sample requests.
+4. Open [Available Jobs](http://127.0.0.1:3000/jobs). Find the new title and open its card. Confirm the details, customer 1, no helper, and **Accept Job**.
+5. Click **Accept Job**. Expect Accepted, Helper #2 (you), and the accept button to disappear.
+6. Use **Back to available jobs**. The new request must be absent. Other open requests remain visible.
+7. Open [My Deliveries](http://127.0.0.1:3000/my-deliveries). Find the same request with **Mark Picked Up**.
+8. Click **Mark Picked Up**, then **Start Delivery**, then **Mark Delivered**, waiting for each confirmation. The badges must progress Picked up → Delivering → Delivered. After completion, no status-action button remains.
+9. In another tab, open [My Requests](http://127.0.0.1:3000/my-requests). Click **Refresh requests** after each helper step. The new card must show Helper #2 and the matching status, ending in Delivered.
+10. Reload both pages and open the request details again. Delivered, the helper, amounts, addresses, and deadline must remain saved.
+11. From `backend`, run `./mvnw test`; from `frontend`, run `npm test` with both services running. The automated integration tests use disposable schemas and do not modify these development records.
+
+Stop before Stage 19 until requested.
 
 ## Manual creation and viewing tests
 
@@ -887,7 +944,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw test
 ```
 
-The 276 tests cover helper-only delivery listing, customer-only request tracking across every status, deterministic ordering, tracking after acceptance/delivery updates, health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, consistent business/validation/framework/server errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
+The 280 tests cover the complete real-HTTP customer/helper journey, rejected-action recovery across tracking views, helper-only delivery listing, customer-only request tracking across every status, deterministic ordering, tracking after acceptance/delivery updates, health, creation in all categories, all Stage 5 DTOs and field validation, exact creation-response consistency with committed data, customer/helper relationships, timestamps and timezone handling, enum values, database constraints, rollback, idempotent seeding, listing only OPEN requests in mixed datasets, complete details for all statuses, read operations leaving records unchanged, consistent business/validation/framework/server errors, populated legacy-schema migration through V3, acceptance, all status transitions, and real concurrent acceptance/status transactions.
 
 Tests use unique `test_java_*` PostgreSQL schemas and drop only those schemas afterward. They do not clear development tables, substitute an in-memory database, or silently skip database failures.
 
@@ -1075,12 +1132,17 @@ Stage 17 files:
 - Updated `frontend/tests/home.test.mjs`: verify readable status labels in the existing live card tests.
 - Updated `README.md`: scope, important code, verification, manual checks, file list, and commit suggestion. Earlier uncommitted Stage 15/16 work is preserved.
 
+Stage 18 files:
+
+- Added `backend/src/test/java/com/localdelivery/DeliveryWorkflowIntegrationTest.java`: four complete-flow HTTP integration cases with isolated PostgreSQL data and cross-view persistence assertions.
+- Updated `README.md`: test coverage, browser results, important code, exact reproduction steps, and commit suggestion.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-style: improve local delivery interface
+test: add end-to-end delivery workflow coverage
 ```
 
-Stage 17 is complete. Stop before Stage 18 until requested.
+Stage 18 is complete. Stop before Stage 19 until requested.
