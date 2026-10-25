@@ -1,3 +1,4 @@
+import { requireUser, sessionHeaders } from "../../../lib/server-api";
 import { LoadingState } from "../../../components/loading-state";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -15,9 +16,16 @@ async function Details({ params }: Props) {
 	const { id } = await params;
 	if (!isRequestId(id)) notFound();
 	await connection();
+	const user = await requireUser();
 	try {
-		const request = await fetchRequest(id);
-		return <RequestDetails key={request.id} initialRequest={request} />;
+		const request = await fetchRequest(id, await sessionHeaders());
+		return (
+			<RequestDetails
+				userId={user.id}
+				key={request.id}
+				initialRequest={request}
+			/>
+		);
 	} catch (error) {
 		if (error instanceof ApiError && error.status === 404) notFound();
 		return (

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Navigation } from "../components/navigation";
+import { AuthMenu } from "../components/auth-menu";
+import { currentUser } from "../lib/server-api";
 
 import "./globals.css";
 
@@ -10,7 +12,12 @@ export const metadata: Metadata = {
 	description: "A local peer-to-peer delivery project for Oslo.",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({
+	children,
+}: {
+	children: ReactNode;
+}) {
+	const user = await currentUser().catch(() => null);
 	return (
 		<html lang="en">
 			<body>
@@ -25,6 +32,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 						<span className="location">Oslo, Norway</span>
 					</div>
 					<Navigation />
+					<AuthMenu user={user} />
 				</header>
 				<main id="main-content" tabIndex={-1} className="page-content">
 					{children}

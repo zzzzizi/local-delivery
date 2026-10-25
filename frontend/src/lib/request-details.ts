@@ -42,9 +42,12 @@ export function isDeliveryRequest(value: unknown): value is DeliveryRequest {
 	);
 }
 
-export async function fetchRequest(id: string): Promise<DeliveryRequest> {
+export async function fetchRequest(
+	id: string,
+	headers?: HeadersInit,
+): Promise<DeliveryRequest> {
 	if (!isRequestId(id)) throw new ApiError(404, "Delivery request not found.");
-	const data = await apiRequest<unknown>(`/requests/${id}`);
+	const data = await apiRequest<unknown>(`/requests/${id}`, { headers });
 	if (!isDeliveryRequest(data) || String(data.id) !== id) {
 		throw new ApiError(
 			502,
@@ -62,19 +65,22 @@ export type AcceptanceResult = {
 };
 
 /** Never retry a POST automatically. Reconcile conflicts or uncertain results with a GET. */
-export async function acceptJob(id: string): Promise<AcceptanceResult> {
+export async function acceptJob(
+	id: string,
+	userId: number,
+): Promise<AcceptanceResult> {
 	if (!isRequestId(id)) throw new ApiError(404, "Delivery request not found.");
 	let accepted: DeliveryRequest;
 	try {
 		const data = await apiRequest<unknown>(`/requests/${id}/accept`, {
 			method: "POST",
-			body: { helperId: 2 },
+			body: {},
 		});
 		if (
 			!isDeliveryRequest(data) ||
 			String(data.id) !== id ||
 			data.status !== "ACCEPTED" ||
-			data.helperId !== 2
+			data.helperId !== userId
 		) {
 			throw new ApiError(
 				502,
@@ -105,7 +111,7 @@ export async function acceptJob(id: string): Promise<AcceptanceResult> {
 			};
 		}
 		if (
-			current?.helperId === 2 &&
+			current?.helperId === userId &&
 			current.status !== "OPEN" &&
 			current.status !== "CANCELLED"
 		) {

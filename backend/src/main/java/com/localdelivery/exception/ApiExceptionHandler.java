@@ -24,6 +24,15 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+    ResponseEntity<ApiError> unauthenticated() {
+        return response(HttpStatus.UNAUTHORIZED, "Invalid email or password. Please log in again.", Map.of());
+    }
+
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    ResponseEntity<ApiError> forbidden() {
+        return response(HttpStatus.FORBIDDEN, "You are not allowed to perform this action.", Map.of());
+    }
     public record ApiError(OffsetDateTime timestamp, int status, String error,
                            String message, Map<String, String> fields) {}
 

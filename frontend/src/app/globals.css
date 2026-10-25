@@ -693,3 +693,21 @@ fieldset:disabled .button {
 		align-items: stretch;
 	}
 }
+/* Account controls reuse the same form and button styles as the delivery workflow. */
+.auth-menu {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 1rem;
+	flex-wrap: wrap;
+	margin-top: 1rem;
+}
+.auth-menu a {
+	color: var(--ink);
+	font-weight: 600;
+}
+.auth-form {
+	max-width: 32rem;
+	display: grid;
+	gap: 1.2rem;
+}

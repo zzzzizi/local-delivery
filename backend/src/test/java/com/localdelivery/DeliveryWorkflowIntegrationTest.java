@@ -29,12 +29,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Real HTTP and committed PostgreSQL transactions; no mocked service or test transaction. */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "server.servlet.session.cookie.secure=false")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class DeliveryWorkflowIntegrationTest {
     private static final PostgresTestDatabase DATABASE = new PostgresTestDatabase();
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5)).build();
+    private static final java.util.Map<Long, HttpClient> CLIENTS = new java.util.HashMap<>();
+    private static final String PASSWORD = "Stage 20 test-only passphrase";
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -46,7 +46,8 @@ class DeliveryWorkflowIntegrationTest {
 
     @AfterAll
     static void closeResources() {
-        HTTP.close();
+        CLIENTS.values().forEach(HttpClient::close);
+        CLIENTS.clear();
         DATABASE.close();
     }
 
@@ -64,11 +65,16 @@ class DeliveryWorkflowIntegrationTest {
         this.demoUsers = demoUsers;
     }
 
+    @Autowired org.springframework.security.crypto.password.PasswordEncoder passwords;
+
     @BeforeEach
     void seedIsolatedDatabase() {
         assertThat(jdbc.queryForObject("SELECT current_schema()", String.class)).isEqualTo(DATABASE.schema);
         jdbc.execute("TRUNCATE delivery_requests, users RESTART IDENTITY CASCADE");
         demoUsers.seed();
+        jdbc.update("UPDATE users SET password_hash = ?", passwords.encode(PASSWORD));
+        CLIENTS.values().forEach(HttpClient::close);
+        CLIENTS.clear();
     }
 
     @ParameterizedTest
@@ -132,7 +138,7 @@ class DeliveryWorkflowIntegrationTest {
 
         // A client cannot bypass helper assignment via a status PATCH.
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        assertConflict(update(id, "ACCEPTED", 409));
+        assertThat(update(id, "ACCEPTED", 403).get("status").asInt()).isEqualTo(403);
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
         assertAllViews(current, waiting, otherAssigned);
 
@@ -218,13 +224,31 @@ class DeliveryWorkflowIntegrationTest {
     private JsonNode get(String path) throws Exception { return request("GET", path, null, 200); }
 
     private JsonNode request(String method, String path, JsonNode body, int expectedStatus) throws Exception {
+        long actor = path.startsWith("/api/users/2/") ? 2 : 1;
+        if (method.equals("POST") && path.equals("/api/requests")) actor = body.get("customerId").asLong();
+        else if (path.endsWith("/accept")) actor = body.get("helperId").asLong();
+        else if (method.equals("PATCH")) actor = body.get("status").asText().equals("CANCELLED") ? 1 : 2;
+        var client = CLIENTS.get(actor);
+        if (client == null) {
+            client = HttpClient.newBuilder().cookieHandler(new java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ALL))
+                    .connectTimeout(Duration.ofSeconds(5)).build();
+            CLIENTS.put(actor, client);
+            send(client, "POST", "/api/auth/login", json.createObjectNode()
+                    .put("email", actor == 1 ? "customer@example.com" : "helper@example.com").put("password", PASSWORD), 200);
+        }
+        return send(client, method, path, body, expectedStatus);
+    }
+
+    private JsonNode send(HttpClient client, String method, String path, JsonNode body, int expectedStatus) throws Exception {
         var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .timeout(Duration.ofSeconds(10)).header("Accept", "application/json")
-                .header("Content-Type", "application/json")
-                .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
-                        : HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
-                .build();
-        var response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+                .header("Content-Type", "application/json");
+        if (!method.equals("GET")) {
+            var csrf = send(client, "GET", "/api/auth/csrf", null, 200);
+            request.header(csrf.get("headerName").asText(), csrf.get("token").asText());
+        }
+        var response = client.send(request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build(), HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).as("%s %s: %s", method, path, response.body()).isEqualTo(expectedStatus);
         assertThat(response.headers().firstValue("Content-Type").orElse("")).startsWith("application/json");
         return json.readTree(response.body());

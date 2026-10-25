@@ -18,6 +18,10 @@ public class User {
     @Column(nullable = false, unique = true, length = 320)
     private String email;
 
+    // Null for preserved pre-authentication demo accounts; these cannot log in.
+    @Column(name = "password_hash", length = 255)
+    private String passwordHash;
+
     @Column(length = 32)
     private String phone;
 
@@ -45,6 +49,8 @@ public class User {
     public void setName(String name) { this.name = name; }
 
     public String getEmail() { return email; }
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public void setEmail(String email) { this.email = email; }
 
     public String getPhone() { return phone; }

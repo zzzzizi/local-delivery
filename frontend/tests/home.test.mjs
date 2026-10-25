@@ -1,11 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync } from "node:fs";
-import { ApiError, apiRequest } from "../src/lib/api.ts";
+import { ApiError, apiRequest as sendApiRequest } from "../src/lib/api.ts";
 import { formatOsloDate } from "../src/lib/create-request.ts";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 const baseUrl = process.env.FRONTEND_TEST_URL ?? "http://127.0.0.1:3000";
+const customerCookie = process.env.FRONTEND_CUSTOMER_COOKIE;
+const helperCookie = process.env.FRONTEND_HELPER_COOKIE;
+const customerId = Number(process.env.FRONTEND_CUSTOMER_ID);
+const helperId = Number(process.env.FRONTEND_HELPER_ID);
+if (!customerCookie || !helperCookie || !customerId || !helperId) {
+  throw new Error("Run node scripts/test-docker.mjs from the project root to supply isolated authenticated test sessions.");
+}
+function cookieFor(path) {
+  return path.includes("deliveries") || /\/requests\/[^/]+$/.test(path) && !path.endsWith("/new") ? helperCookie : customerCookie;
+}
+async function fetch(url, init = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("Cookie", cookieFor(new URL(url).pathname));
+  if (init.method && init.method !== "GET") {
+    const csrf = await globalThis.fetch(`${baseUrl}/backend-api/auth/csrf`, { headers });
+    const token = await csrf.json();
+    headers.set(token.headerName, token.token);
+  }
+  return globalThis.fetch(url, { ...init, headers });
+}
+function apiRequest(path, options = {}) {
+  return sendApiRequest(path, { ...options, headers: { ...options.headers, Cookie: cookieFor(path) } });
+}
 const statusLabels = {
 	OPEN: "Open",
 	ACCEPTED: "Accepted",
@@ -215,7 +238,7 @@ test("acceptance proxy preserves helper validation without mutating a request", 
 	const response = await fetch(`${baseUrl}/backend-api/requests/1/accept`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: "{}",
+		body: '{"helperId":0}',
 	});
 	assert.equal(response.status, 422);
 	const error = await response.json();
@@ -224,7 +247,7 @@ test("acceptance proxy preserves helper validation without mutating a request", 
 });
 
 test("customer tracking cards match every live API request in order", async () => {
-	const requests = await apiRequest("/users/1/requests");
+	const requests = await apiRequest("/me/requests");
 	const response = await fetch(`${baseUrl}/my-requests`, {
 		signal: AbortSignal.timeout(15000),
 	});
@@ -247,7 +270,7 @@ test("customer tracking cards match every live API request in order", async () =
 			.replaceAll('"', "&quot;")
 			.replaceAll("'", "&#x27;");
 	for (const [index, request] of requests.entries()) {
-		assert.equal(request.customerId, 1);
+		assert.equal(request.customerId, customerId);
 		const card = cards[index];
 		assert.ok(card.includes(`href="/requests/${request.id}"`));
 		assert.ok(card.includes(`data-status="${request.status}"`));
@@ -274,15 +297,15 @@ test("customer tracking cards match every live API request in order", async () =
 });
 
 test("customer tracking is available through the same-origin proxy", async () => {
-	const requests = await apiRequest("/users/1/requests");
-	const response = await fetch(`${baseUrl}/backend-api/users/1/requests`);
+	const requests = await apiRequest("/me/requests");
+	const response = await fetch(`${baseUrl}/backend-api/me/requests`);
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), requests);
 });
 
 for (const [id, status] of [
 	["0", 422],
-	["9223372036854775807", 404],
+	["9223372036854775807", 403],
 ]) {
 	test(`customer tracking preserves ${status} errors through the proxy`, async () => {
 		const response = await fetch(`${baseUrl}/backend-api/users/${id}/requests`);
@@ -295,7 +318,7 @@ for (const [id, status] of [
 }
 
 test("helper delivery cards match assigned jobs and expose only the appropriate next step", async () => {
-	const deliveries = await apiRequest("/users/2/deliveries");
+	const deliveries = await apiRequest("/me/deliveries");
 	const response = await fetch(`${baseUrl}/my-deliveries`, {
 		signal: AbortSignal.timeout(15000),
 	});
@@ -325,7 +348,7 @@ test("helper delivery cards match assigned jobs and expose only the appropriate 
 			.replaceAll('"', "&quot;")
 			.replaceAll("'", "&#x27;");
 	for (const [index, request] of deliveries.entries()) {
-		assert.equal(request.helperId, 2);
+		assert.equal(request.helperId, helperId);
 		const card = cards[index];
 		assert.ok(card.includes(`data-request-id="${request.id}"`));
 		assert.ok(card.includes(`href="/requests/${request.id}"`));
@@ -356,15 +379,15 @@ test("helper delivery cards match assigned jobs and expose only the appropriate 
 });
 
 test("helper delivery list is available through the same-origin proxy", async () => {
-	const deliveries = await apiRequest("/users/2/deliveries");
-	const response = await fetch(`${baseUrl}/backend-api/users/2/deliveries`);
+	const deliveries = await apiRequest("/me/deliveries");
+	const response = await fetch(`${baseUrl}/backend-api/me/deliveries`);
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), deliveries);
 });
 
 for (const [id, status] of [
 	["0", 422],
-	["9223372036854775807", 404],
+	["9223372036854775807", 403],
 ]) {
 	test(`helper delivery list preserves ${status} errors through the proxy`, async () => {
 		const response = await fetch(

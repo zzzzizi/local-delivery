@@ -1,0 +1,10 @@
+# Allow only build inputs; especially exclude .env.local, node_modules, and .next.
+**
+!package.json
+!package-lock.json
+!next.config.mjs
+!tsconfig.json
+!src/
+!src/**
+!public/
+!public/**

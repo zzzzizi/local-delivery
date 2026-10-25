@@ -17,8 +17,10 @@ import {
 
 export function DeliveryBoard({
 	initialDeliveries,
+	userId,
 }: {
 	initialDeliveries: DeliveryRequest[];
+	userId: number;
 }) {
 	const [deliveries, setDeliveries] = useState(initialDeliveries);
 	const [pending, setPending] = useState<number | "refresh" | null>(null);
@@ -36,17 +38,18 @@ export function DeliveryBoard({
 	async function act(target: number | "refresh") {
 		if (busy.current || (target !== "refresh" && blocked)) return;
 		const request = deliveries.find((item) => item.id === target);
-		if (target !== "refresh" && (!request || !deliveryAction(request))) return;
+		if (target !== "refresh" && (!request || !deliveryAction(request, userId)))
+			return;
 		busy.current = true;
 		setPending(target);
 		setNotice(null);
 		try {
 			if (target === "refresh") {
-				setDeliveries(await fetchDeliveries());
+				setDeliveries(await fetchDeliveries(userId));
 				setBlocked(false);
 				setNotice({ kind: "success", message: "Delivery details refreshed." });
 			} else if (request) {
-				const result = await advanceDelivery(request);
+				const result = await advanceDelivery(request, userId);
 				if (result.deliveries) setDeliveries(result.deliveries);
 				else if (result.saved) {
 					const saved = result.saved;
@@ -118,7 +121,7 @@ export function DeliveryBoard({
 			) : (
 				<ul className="jobs-grid">
 					{deliveries.map((request) => {
-						const action = deliveryAction(request);
+						const action = deliveryAction(request, userId);
 						return (
 							<li key={request.id}>
 								<article

@@ -34,6 +34,21 @@ export async function apiRequest<T>(
 	const headers = new Headers(init.headers);
 	headers.set("Accept", "application/json");
 	if (body !== undefined) headers.set("Content-Type", "application/json");
+	// Session cookies are HttpOnly. CSRF tokens are short-lived and fetched anew after login/logout.
+	if (
+		typeof window !== "undefined" &&
+		!["GET", "HEAD", "OPTIONS"].includes((init.method ?? "GET").toUpperCase())
+	) {
+		const csrf = await apiRequest<{ token: string; headerName: string }>(
+			"/auth/csrf",
+		);
+		if (!csrf?.token || csrf.headerName !== "X-CSRF-TOKEN")
+			throw new ApiError(
+				403,
+				"Unable to verify your session. Refresh and try again.",
+			);
+		headers.set(csrf.headerName, csrf.token);
+	}
 
 	const response = await fetch(`${baseUrl}${path}`, {
 		...init,

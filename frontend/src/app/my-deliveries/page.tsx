@@ -1,3 +1,4 @@
+import { requireUser, sessionHeaders } from "../../lib/server-api";
 import { LoadingState } from "../../components/loading-state";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -11,8 +12,16 @@ export const metadata: Metadata = { title: "My Deliveries" };
 
 async function Deliveries() {
 	await connection();
+	const user = await requireUser();
 	try {
-		return <DeliveryBoard initialDeliveries={await fetchDeliveries()} />;
+		return (
+			<DeliveryBoard
+				userId={user.id}
+				initialDeliveries={
+					await fetchDeliveries(user.id, await sessionHeaders())
+				}
+			/>
+		);
 	} catch (error) {
 		return (
 			<div className="error-notice jobs-error" role="alert">

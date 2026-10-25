@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -35,6 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@WithMockUser(username = "1")
 class DeliveryApiTest {
     private static final PostgresTestDatabase DATABASE = new PostgresTestDatabase();
 
@@ -80,7 +84,7 @@ class DeliveryApiTest {
     }
 
     private JsonNode create(ObjectNode body) throws Exception {
-        String response = mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        String response = mvc.perform(post("/api/requests").with(csrf()).with(user(body.path("customerId").asText("1"))).contentType("application/json").content(body.toString()))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         return json.readTree(response);
     }
@@ -168,12 +172,12 @@ class DeliveryApiTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"customerId", "category", "title", "description", "pickupAddress",
+    @ValueSource(strings = {"category", "title", "description", "pickupAddress",
             "deliveryAddress", "helperReward", "deadline"})
     void requiredFields(String field) throws Exception {
         ObjectNode body = payload();
         body.remove(field);
-        mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        mvc.perform(post("/api/requests").with(csrf()).with(user(body.path("customerId").asText("1"))).contentType("application/json").content(body.toString()))
                 .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.fields." + field).exists());
         assertThat(requests.count()).isZero();
     }
@@ -205,7 +209,7 @@ class DeliveryApiTest {
     void invalidInputDoesNotSave(String field, Object value) throws Exception {
         ObjectNode body = payload();
         body.set(field, json.valueToTree(value));
-        mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        mvc.perform(post("/api/requests").with(csrf()).with(user(body.path("customerId").asText("1"))).contentType("application/json").content(body.toString()))
                 .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.status").value(422));
         assertThat(requests.count()).isZero();
     }
@@ -214,7 +218,7 @@ class DeliveryApiTest {
     @ValueSource(strings = {"id", "helperId", "status"})
     void cannotSetServerOwnedFields(String field) throws Exception {
         ObjectNode body = payload().put(field, "1");
-        mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        mvc.perform(post("/api/requests").with(csrf()).with(user(body.path("customerId").asText("1"))).contentType("application/json").content(body.toString()))
                 .andExpect(status().isUnprocessableEntity());
         assertThat(requests.count()).isZero();
     }
@@ -252,7 +256,7 @@ class DeliveryApiTest {
 
     @Test
     void unknownCustomer() throws Exception {
-        mvc.perform(post("/api/requests").contentType("application/json").content(payload().put("customerId", 9999).toString()))
+        mvc.perform(post("/api/requests").with(csrf()).contentType("application/json").content(payload().put("customerId", 9999).toString()).with(user("9999")))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.message").value("Customer not found."));
         assertThat(requests.count()).isZero();
     }
@@ -381,7 +385,7 @@ class DeliveryApiTest {
     void failedServiceTransactionRollsBack() {
         var input = new CreateDeliveryRequestRequest(1L, RequestCategory.PACKAGE, "Parcel", "A parcel",
                 "Majorstuen", "Frogner", null, new BigDecimal("-1"), OffsetDateTime.now(ZoneOffset.UTC).plusDays(1));
-        assertThatThrownBy(() -> service.create(input)).isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> service.create(input, 1L)).isInstanceOf(DataAccessException.class);
         assertThat(requests.count()).isZero();
     }
 

@@ -8,6 +8,7 @@ import com.localdelivery.service.DeliveryRequestService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.util.List;
+import java.security.Principal;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -24,8 +25,8 @@ public class DeliveryRequestController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public DeliveryRequestResponse create(@Valid @RequestBody CreateDeliveryRequestRequest request) {
-        return service.create(request);
+    public DeliveryRequestResponse create(@Valid @RequestBody CreateDeliveryRequestRequest request, Principal principal) {
+        return service.create(request, Long.valueOf(principal.getName()));
     }
 
     @GetMapping
@@ -35,18 +36,18 @@ public class DeliveryRequestController {
 
     @PostMapping("/{id}/accept")
     public DeliveryRequestResponse accept(@PathVariable @Positive Long id,
-                                          @Valid @RequestBody AcceptRequestDto request) {
-        return service.accept(id, request);
+                                          @Valid @RequestBody AcceptRequestDto request, Principal principal) {
+        return service.accept(id, request, Long.valueOf(principal.getName()));
     }
 
     @PatchMapping("/{id}/status")
     public DeliveryRequestResponse updateStatus(@PathVariable @Positive Long id,
-                                                @Valid @RequestBody UpdateStatusRequest request) {
-        return service.updateStatus(id, request);
+                                                @Valid @RequestBody UpdateStatusRequest request, Principal principal) {
+        return service.updateStatus(id, request, Long.valueOf(principal.getName()));
     }
 
     @GetMapping("/{id}")
-    public DeliveryRequestResponse get(@PathVariable @Positive Long id) {
-        return service.get(id);
+    public DeliveryRequestResponse get(@PathVariable @Positive Long id, Principal principal) {
+        return service.get(id, Long.valueOf(principal.getName()));
     }
 }

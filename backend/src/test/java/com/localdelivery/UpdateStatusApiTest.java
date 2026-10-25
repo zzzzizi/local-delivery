@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.localdelivery.dto.AcceptRequestDto;
@@ -40,6 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@WithMockUser(username = "1")
 class UpdateStatusApiTest {
     private static final PostgresTestDatabase DATABASE = new PostgresTestDatabase();
 
@@ -75,7 +79,7 @@ class UpdateStatusApiTest {
                 .put("pickupAddress", "Majorstuen, Oslo").put("deliveryAddress", "Frogner, Oslo")
                 .put("shoppingBudget", 120.50).put("helperReward", 80)
                 .put("deadline", OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).toString());
-        return bodyOf(mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        return bodyOf(mvc.perform(post("/api/requests").with(csrf()).contentType("application/json").content(body.toString()))
                 .andExpect(status().isCreated()));
     }
 
@@ -88,7 +92,7 @@ class UpdateStatusApiTest {
     }
 
     private ResultActions update(long id, DeliveryStatus next) throws Exception {
-        return mvc.perform(patch("/api/requests/" + id + "/status").contentType("application/json")
+        return mvc.perform(patch("/api/requests/" + id + "/status").with(csrf()).with(user(next == DeliveryStatus.CANCELLED ? "1" : "2")).contentType("application/json")
                 .content("{\"status\":\"" + next + "\"}"));
     }
 
@@ -133,6 +137,9 @@ class UpdateStatusApiTest {
             assertThat(stored.get("version")).isEqualTo(1L);
             assertThat(stored.get("updated_at")).isNotEqualTo(storedBefore.get("updated_at"));
             mvc.perform(get("/api/requests")).andExpect(status().isOk()).andExpect(content().json("[]"));
+        } else if (current == DeliveryStatus.OPEN) {
+            result.andExpect(status().isForbidden()).andExpect(jsonPath("$.status").value(403));
+            assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(storedBefore);
         } else {
             result.andExpect(status().isConflict()).andExpect(jsonPath("$.status").value(409))
                     .andExpect(jsonPath("$.error").value("Conflict"))
@@ -153,7 +160,7 @@ class UpdateStatusApiTest {
     @EnumSource(RequestCategory.class)
     void progressesFromCreationThroughAcceptanceToDelivered(RequestCategory category) throws Exception {
         long id = create(category).get("id").asLong();
-        JsonNode previous = bodyOf(mvc.perform(post("/api/requests/" + id + "/accept")
+        JsonNode previous = bodyOf(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2"))
                 .contentType("application/json").content("{\"helperId\":2}")).andExpect(status().isOk()));
         long version = 1;
         for (var next : List.of(DeliveryStatus.PICKED_UP, DeliveryStatus.DELIVERING, DeliveryStatus.DELIVERED)) {
@@ -189,7 +196,7 @@ class UpdateStatusApiTest {
     void invalidBodiesReturn422WithoutMutation(String body) throws Exception {
         long id = createInState(DeliveryStatus.ACCEPTED);
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        mvc.perform(patch("/api/requests/" + id + "/status").contentType("application/json").content(body))
+        mvc.perform(patch("/api/requests/" + id + "/status").with(csrf()).contentType("application/json").content(body))
                 .andExpect(status().isUnprocessableEntity());
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
     }
@@ -197,7 +204,7 @@ class UpdateStatusApiTest {
     @ParameterizedTest
     @ValueSource(strings = {"0", "-1", "abc", "1.5", "9223372036854775808"})
     void invalidPathIdsReturn422(String id) throws Exception {
-        mvc.perform(patch("/api/requests/" + id + "/status").contentType("application/json")
+        mvc.perform(patch("/api/requests/" + id + "/status").with(csrf()).contentType("application/json")
                 .content("{\"status\":\"PICKED_UP\"}")).andExpect(status().isUnprocessableEntity());
         assertThat(requests.count()).isZero();
     }
@@ -208,8 +215,8 @@ class UpdateStatusApiTest {
         long id = createInState(current);
         jdbc.update("UPDATE delivery_requests SET helper_id = NULL WHERE id = ?", id);
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        update(id, next).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("Delivery request has no assigned helper."));
+        update(id, next).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("You are not allowed to perform this action."));
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
     }
 
@@ -243,8 +250,8 @@ class UpdateStatusApiTest {
                         assertThat(initial.getVersion()).isZero();
                         assertThat(initial.getStatus()).isEqualTo(initialStatus);
                         await(bothRead);
-                        return next == DeliveryStatus.ACCEPTED ? service.accept(id, new AcceptRequestDto(2L))
-                                : service.updateStatus(id, new UpdateStatusRequest(next));
+                        return next == DeliveryStatus.ACCEPTED ? service.accept(id, new AcceptRequestDto(2L), 2L)
+                                : service.updateStatus(id, new UpdateStatusRequest(next), next == DeliveryStatus.CANCELLED ? 1L : 2L);
                     });
                     return new UpdateAttempt(response, null);
                 } catch (RuntimeException failure) {

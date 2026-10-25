@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -30,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@WithMockUser(username = "1")
 class CustomerRequestsApiTest {
     private static final PostgresTestDatabase DATABASE = new PostgresTestDatabase();
 
@@ -67,12 +71,12 @@ class CustomerRequestsApiTest {
         body.putNull("shoppingBudget");
         body.put("helperReward", 0);
         body.put("deadline", OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).withNano(0).toString());
-        return json.readTree(mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        return json.readTree(mvc.perform(post("/api/requests").with(csrf()).with(user(Long.toString(customerId))).contentType("application/json").content(body.toString()))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
     }
 
     private JsonNode list(long customerId) throws Exception {
-        return json.readTree(mvc.perform(get("/api/users/" + customerId + "/requests"))
+        return json.readTree(mvc.perform(get("/api/users/" + customerId + "/requests").with(user(Long.toString(customerId))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
     }
 
@@ -84,7 +88,7 @@ class CustomerRequestsApiTest {
 
     @Test
     void missingCustomerReturnsConsistentNotFound() throws Exception {
-        mvc.perform(get("/api/users/9223372036854775807/requests"))
+        mvc.perform(get("/api/users/9223372036854775807/requests").with(user("9223372036854775807")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -160,13 +164,13 @@ class CustomerRequestsApiTest {
     void trackingReflectsCommittedAcceptanceAndDeliveryUpdates() throws Exception {
         long id = create(1, RequestCategory.PICKUP).get("id").asLong();
         assertThat(list(1).get(0).get("status").asText()).isEqualTo("OPEN");
-        JsonNode accepted = json.readTree(mvc.perform(post("/api/requests/" + id + "/accept")
+        JsonNode accepted = json.readTree(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2"))
                 .contentType("application/json").content("{\"helperId\":2}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         assertThat(list(1).get(0)).isEqualTo(accepted);
         assertThat(list(2)).isEmpty();
         for (String state : new String[]{"PICKED_UP", "DELIVERING", "DELIVERED"}) {
-            JsonNode updated = json.readTree(mvc.perform(patch("/api/requests/" + id + "/status")
+            JsonNode updated = json.readTree(mvc.perform(patch("/api/requests/" + id + "/status").with(csrf()).with(user("2"))
                     .contentType("application/json").content("{\"status\":\"" + state + "\"}"))
                     .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
             assertThat(list(1).get(0)).isEqualTo(updated);

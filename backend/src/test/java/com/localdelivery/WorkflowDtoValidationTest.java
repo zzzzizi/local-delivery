@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.UpdateStatusRequest;
 import com.localdelivery.model.DeliveryStatus;
@@ -21,6 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(WorkflowDtoValidationTest.ValidationProbe.class)
 @Import(WorkflowDtoValidationTest.ValidationProbe.class)
+@WithMockUser(username = "1")
 class WorkflowDtoValidationTest {
     @Autowired MockMvc mvc;
 
@@ -42,16 +46,16 @@ class WorkflowDtoValidationTest {
     @ParameterizedTest
     @ValueSource(longs = {1, 2, Long.MAX_VALUE})
     void acceptsPositiveHelperIds(long helperId) throws Exception {
-        mvc.perform(post("/test/dto/accept").contentType("application/json")
+        mvc.perform(post("/test/dto/accept").with(csrf()).with(user("2")).contentType("application/json")
                         .content("{\"helperId\":" + helperId + "}"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"helperId\":" + helperId + "}"));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"{}", "{\"helperId\":null}", "{\"helperId\":0}", "{\"helperId\":-1}"})
+    @ValueSource(strings = {"{\"helperId\":0}", "{\"helperId\":-1}"})
     void requiresPositiveHelperId(String body) throws Exception {
-        mvc.perform(post("/test/dto/accept").contentType("application/json").content(body))
+        mvc.perform(post("/test/dto/accept").with(csrf()).with(user("2")).contentType("application/json").content(body))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.status").value(422))
                 .andExpect(jsonPath("$.timestamp").isString())
@@ -73,14 +77,14 @@ class WorkflowDtoValidationTest {
     @EnumSource(DeliveryStatus.class)
     void acceptsEveryKnownStatusValue(DeliveryStatus deliveryStatus) throws Exception {
         String body = "{\"status\":\"" + deliveryStatus.name() + "\"}";
-        mvc.perform(post("/test/dto/status").contentType("application/json").content(body))
+        mvc.perform(post("/test/dto/status").with(csrf()).contentType("application/json").content(body))
                 .andExpect(status().isOk()).andExpect(content().json(body));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"{}", "{\"status\":null}"})
     void requiresStatus(String body) throws Exception {
-        mvc.perform(post("/test/dto/status").contentType("application/json").content(body))
+        mvc.perform(post("/test/dto/status").with(csrf()).contentType("application/json").content(body))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.status").value(422))
                 .andExpect(jsonPath("$.message").value("Validation failed."))
@@ -98,7 +102,7 @@ class WorkflowDtoValidationTest {
     }
 
     private void assertInvalidBody(String path, String body) throws Exception {
-        mvc.perform(post(path).contentType("application/json").content(body))
+        mvc.perform(post(path).with(csrf()).contentType("application/json").content(body))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.status").value(422))
                 .andExpect(jsonPath("$.timestamp").isString())

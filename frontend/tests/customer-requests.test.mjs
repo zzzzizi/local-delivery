@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isCustomerRequests } from "../src/lib/customer-requests.ts";
+import { isCustomerRequests as checkCustomerRequests } from "../src/lib/customer-requests.ts";
 
 const request = {
 	id: 12,
@@ -79,3 +79,5 @@ test("rejects invalid display data and unknown statuses", () => {
 		assert.equal(isCustomerRequests([{ ...request, [field]: value }]), false);
 	}
 });
+
+function isCustomerRequests(value) { return checkCustomerRequests(value, 1); }

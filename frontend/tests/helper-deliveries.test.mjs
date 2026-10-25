@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
-	advanceDelivery,
-	deliveryAction,
-	fetchDeliveries,
-	isHelperDeliveries,
+	advanceDelivery as advanceDeliveryAs,
+	deliveryAction as deliveryActionAs,
+	fetchDeliveries as fetchDeliveriesAs,
+	isHelperDeliveries as isHelperDeliveriesAs,
 } from "../src/lib/helper-deliveries.ts";
 
 const originalUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -113,7 +113,7 @@ for (const [current, next, label] of [
 		assert.equal(patch[0], "https://delivery.example/api/requests/13/status");
 		assert.equal(patch[1].method, "PATCH");
 		assert.deepEqual(JSON.parse(patch[1].body), { status: next });
-		assert.equal(get[0], "https://delivery.example/api/users/2/deliveries");
+		assert.equal(get[0], "https://delivery.example/api/me/deliveries");
 		assert.equal(get[1].method, undefined);
 		assert.equal(get[1].cache, "no-store");
 	});
@@ -246,3 +246,8 @@ test("invalid mutation response is checked against saved data before showing suc
 	assert.equal(result.requiresRefresh, true);
 	assert.deepEqual(result.deliveries, [request]);
 });
+
+function isHelperDeliveries(value) { return isHelperDeliveriesAs(value, 2); }
+function deliveryAction(request) { return deliveryActionAs(request, 2); }
+function fetchDeliveries() { return fetchDeliveriesAs(2); }
+function advanceDelivery(request) { return advanceDeliveryAs(request, 2); }

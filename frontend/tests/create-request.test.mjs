@@ -20,7 +20,6 @@ const valid = {
 test("prepares the exact Java create contract, trims text, and keeps the Oslo wall time", () => {
 	assert.deepEqual(prepareRequest(valid), {
 		payload: {
-			customerId: 1,
 			category: "BUY",
 			title: "Buy groceries",
 			description: "Milk, eggs and bread.",

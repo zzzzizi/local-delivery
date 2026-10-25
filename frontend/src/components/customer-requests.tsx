@@ -1,3 +1,4 @@
+import { requireUser, sessionHeaders } from "../lib/server-api";
 import { StatusBadge } from "./status-badge";
 import Link from "next/link";
 import { connection } from "next/server";
@@ -12,10 +13,13 @@ import { RefreshRequestsButton } from "./refresh-requests-button";
 
 export async function CustomerRequests() {
 	await connection();
+	const user = await requireUser();
 	let requests: DeliveryRequest[];
 	try {
-		const response = await apiRequest<unknown>("/users/1/requests");
-		if (!isCustomerRequests(response)) {
+		const response = await apiRequest<unknown>("/me/requests", {
+			headers: await sessionHeaders(),
+		});
+		if (!isCustomerRequests(response, user.id)) {
 			throw new ApiError(
 				502,
 				"The server returned invalid request data. Please try again.",

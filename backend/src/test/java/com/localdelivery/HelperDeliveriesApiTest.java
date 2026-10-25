@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.localdelivery.model.DeliveryStatus;
@@ -27,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@WithMockUser(username = "1")
 class HelperDeliveriesApiTest {
     private static final PostgresTestDatabase DATABASE = new PostgresTestDatabase();
 
@@ -59,18 +63,18 @@ class HelperDeliveriesApiTest {
                 .put("pickupAddress", "Demo shop, Oslo").put("deliveryAddress", "Demo home, Oslo")
                 .putNull("shoppingBudget").put("helperReward", 0)
                 .put("deadline", OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).withNano(0).toString());
-        return json.readTree(mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        return json.readTree(mvc.perform(post("/api/requests").with(csrf()).with(user(Long.toString(customerId))).contentType("application/json").content(body.toString()))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString()).get("id").asLong();
     }
 
     private JsonNode accept(long id, long helperId) throws Exception {
-        return json.readTree(mvc.perform(post("/api/requests/" + id + "/accept")
+        return json.readTree(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user(Long.toString(helperId)))
                 .contentType("application/json").content("{\"helperId\":" + helperId + "}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
     }
 
     private JsonNode list(long helperId) throws Exception {
-        return json.readTree(mvc.perform(get("/api/users/" + helperId + "/deliveries"))
+        return json.readTree(mvc.perform(get("/api/users/" + helperId + "/deliveries").with(user(Long.toString(helperId))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
     }
 
@@ -83,7 +87,7 @@ class HelperDeliveriesApiTest {
 
     @Test
     void missingHelperReturnsConsistentNotFound() throws Exception {
-        mvc.perform(get("/api/users/9223372036854775807/deliveries"))
+        mvc.perform(get("/api/users/9223372036854775807/deliveries").with(user("9223372036854775807")))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.message").value("Helper not found."))
                 .andExpect(jsonPath("$.error").value("Not Found"))
@@ -142,7 +146,7 @@ class HelperDeliveriesApiTest {
         accept(first, 2); accept(older, 2); accept(tied, 2);
         jdbc.update("UPDATE delivery_requests SET created_at = TIMESTAMP '2026-01-02 12:00:00'");
         jdbc.update("UPDATE delivery_requests SET created_at = TIMESTAMP '2026-01-01 12:00:00' WHERE id = ?", older);
-        mvc.perform(get("/api/users/2/deliveries")).andExpect(status().isOk())
+        mvc.perform(get("/api/users/2/deliveries").with(user("2"))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3)).andExpect(jsonPath("$[0].id").value(tied))
                 .andExpect(jsonPath("$[1].id").value(first)).andExpect(jsonPath("$[2].id").value(older));
     }
@@ -154,7 +158,7 @@ class HelperDeliveriesApiTest {
         JsonNode accepted = accept(id, 2);
         assertThat(list(2).get(0)).isEqualTo(accepted);
         for (String next : new String[]{"PICKED_UP", "DELIVERING", "DELIVERED"}) {
-            JsonNode updated = json.readTree(mvc.perform(patch("/api/requests/" + id + "/status")
+            JsonNode updated = json.readTree(mvc.perform(patch("/api/requests/" + id + "/status").with(csrf()).with(user("2"))
                     .contentType("application/json").content("{\"status\":\"" + next + "\"}"))
                     .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
             assertThat(list(2).get(0)).isEqualTo(updated);
@@ -162,7 +166,7 @@ class HelperDeliveriesApiTest {
                     .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
             assertThat(customer.get(0)).isEqualTo(updated);
             var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-            mvc.perform(patch("/api/requests/" + id + "/status").contentType("application/json")
+            mvc.perform(patch("/api/requests/" + id + "/status").with(csrf()).with(user("2")).contentType("application/json")
                     .content("{\"status\":\"" + next + "\"}")).andExpect(status().isConflict());
             assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
         }

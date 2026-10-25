@@ -1,9 +1,11 @@
+import { requireUser } from "../../../lib/server-api";
 import type { Metadata } from "next";
 import { CreateRequestForm } from "../../../components/create-request-form";
 
 export const metadata: Metadata = { title: "Create Request" };
 
-export default function CreateRequestPage() {
+export default async function CreateRequestPage() {
+	await requireUser();
 	return (
 		<>
 			<h1>Create Request</h1>

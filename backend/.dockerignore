@@ -1,0 +1,8 @@
+# Allow only build inputs; local credentials and generated artifacts never enter the context.
+**
+!.mvn/
+!.mvn/**
+!mvnw
+!pom.xml
+!src/
+!src/**

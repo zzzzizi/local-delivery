@@ -2,13 +2,16 @@ import { ApiError, apiRequest } from "./api.ts";
 import type { DeliveryRequest } from "./create-request";
 import { isDeliveryRequest } from "./request-details.ts";
 
-export function isHelperDeliveries(value: unknown): value is DeliveryRequest[] {
+export function isHelperDeliveries(
+	value: unknown,
+	userId: number,
+): value is DeliveryRequest[] {
 	if (!Array.isArray(value)) return false;
 	const ids = new Set<number>();
 	return value.every((request) => {
 		if (
 			!isDeliveryRequest(request) ||
-			request.helperId !== 2 ||
+			request.helperId !== userId ||
 			ids.has(request.id)
 		)
 			return false;
@@ -17,8 +20,8 @@ export function isHelperDeliveries(value: unknown): value is DeliveryRequest[] {
 	});
 }
 
-export function deliveryAction(request: DeliveryRequest) {
-	if (request.helperId !== 2) return null;
+export function deliveryAction(request: DeliveryRequest, userId: number) {
+	if (request.helperId !== userId) return null;
 	switch (request.status) {
 		case "ACCEPTED":
 			return { status: "PICKED_UP", label: "Mark Picked Up" } as const;
@@ -31,9 +34,12 @@ export function deliveryAction(request: DeliveryRequest) {
 	}
 }
 
-export async function fetchDeliveries(): Promise<DeliveryRequest[]> {
-	const data = await apiRequest<unknown>("/users/2/deliveries");
-	if (!isHelperDeliveries(data))
+export async function fetchDeliveries(
+	userId: number,
+	headers?: HeadersInit,
+): Promise<DeliveryRequest[]> {
+	const data = await apiRequest<unknown>("/me/deliveries", { headers });
+	if (!isHelperDeliveries(data, userId))
 		throw new ApiError(
 			502,
 			"The server returned invalid delivery data. Please try again.",
@@ -54,8 +60,11 @@ const progress = ["ACCEPTED", "PICKED_UP", "DELIVERING", "DELIVERED"];
 /** Send one explicit transition. Never retry a PATCH after a conflict or uncertain response. */
 export async function advanceDelivery(
 	request: DeliveryRequest,
+	userId: number,
 ): Promise<UpdateResult> {
-	const action = isDeliveryRequest(request) ? deliveryAction(request) : null;
+	const action = isDeliveryRequest(request)
+		? deliveryAction(request, userId)
+		: null;
 	if (!action)
 		throw new ApiError(409, "This delivery has no available next step.");
 	let saved: DeliveryRequest;
@@ -67,7 +76,7 @@ export async function advanceDelivery(
 		if (
 			!isDeliveryRequest(data) ||
 			data.id !== request.id ||
-			data.helperId !== 2 ||
+			data.helperId !== userId ||
 			data.status !== action.status
 		) {
 			throw new ApiError(
@@ -79,7 +88,7 @@ export async function advanceDelivery(
 	} catch (error) {
 		let deliveries: DeliveryRequest[] | undefined;
 		try {
-			deliveries = await fetchDeliveries();
+			deliveries = await fetchDeliveries(userId);
 		} catch {
 			/* A manual refresh must succeed before another update. */
 		}
@@ -106,7 +115,7 @@ export async function advanceDelivery(
 		};
 	}
 	try {
-		const deliveries = await fetchDeliveries();
+		const deliveries = await fetchDeliveries(userId);
 		const current = deliveries.find((item) => item.id === request.id);
 		if (
 			current &&

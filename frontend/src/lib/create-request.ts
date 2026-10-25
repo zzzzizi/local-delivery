@@ -32,7 +32,6 @@ export type CreateRequestPayload = Omit<
 	RequestValues,
 	"category" | "shoppingBudget" | "helperReward"
 > & {
-	customerId: 1;
 	category: RequestCategory;
 	shoppingBudget: number | null;
 	helperReward: number;
@@ -97,7 +96,6 @@ export function prepareRequest(
 	if (Object.keys(errors).length) return { errors };
 	return {
 		payload: {
-			customerId: 1,
 			category: values.category as RequestCategory,
 			title: values.title.trim(),
 			description: values.description.trim(),

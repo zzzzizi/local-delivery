@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { ApiError } from "../src/lib/api.ts";
 import {
-	acceptJob,
+	acceptJob as acceptJobAs,
 	fetchRequest,
 	isDeliveryRequest,
 	isRequestId,
@@ -168,7 +168,7 @@ test("acceptance posts helper 2 once, then displays the refreshed GET result", a
 		"https://delivery.example/api/requests/12/accept",
 	);
 	assert.equal(calls[0].arguments[1].method, "POST");
-	assert.deepEqual(JSON.parse(calls[0].arguments[1].body), { helperId: 2 });
+	assert.deepEqual(JSON.parse(calls[0].arguments[1].body), {});
 	assert.equal(
 		calls[1].arguments[0],
 		"https://delivery.example/api/requests/12",
@@ -248,3 +248,5 @@ test("invalid acceptance response is reconciled instead of claiming success", as
 	assert.equal(result.requiresRefresh, true);
 	assert.deepEqual(result.request, open);
 });
+
+function acceptJob(id) { return acceptJobAs(id, 2); }

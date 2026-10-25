@@ -3,7 +3,7 @@
 import { StatusBadge } from "./status-badge";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ApiError } from "../lib/api";
+import { ApiError, apiRequest } from "../lib/api";
 import {
 	categoryLabels,
 	type DeliveryRequest,
@@ -13,11 +13,15 @@ import { acceptJob, fetchRequest } from "../lib/request-details";
 
 export function RequestDetails({
 	initialRequest,
+	userId,
 }: {
 	initialRequest: DeliveryRequest;
+	userId: number;
 }) {
 	const [request, setRequest] = useState(initialRequest);
-	const [pending, setPending] = useState<"accept" | "refresh" | null>(null);
+	const [pending, setPending] = useState<
+		"accept" | "refresh" | "cancel" | null
+	>(null);
 	const [blocked, setBlocked] = useState(false);
 	const [notice, setNotice] = useState<{
 		kind: "success" | "error";
@@ -29,7 +33,7 @@ export function RequestDetails({
 		if (notice) feedback.current?.focus();
 	}, [notice]);
 
-	async function act(action: "accept" | "refresh") {
+	async function act(action: "accept" | "refresh" | "cancel") {
 		if (
 			busy.current ||
 			(action === "accept" && (request.status !== "OPEN" || blocked))
@@ -40,10 +44,17 @@ export function RequestDetails({
 		setNotice(null);
 		try {
 			if (action === "accept") {
-				const result = await acceptJob(String(request.id));
+				const result = await acceptJob(String(request.id), userId);
 				if (result.request) setRequest(result.request);
 				setBlocked(result.requiresRefresh);
 				setNotice({ kind: result.kind, message: result.message });
+			} else if (action === "cancel") {
+				const saved = await apiRequest<DeliveryRequest>(
+					`/requests/${request.id}/status`,
+					{ method: "PATCH", body: { status: "CANCELLED" } },
+				);
+				if (saved) setRequest(saved);
+				setNotice({ kind: "success", message: "Request cancelled." });
 			} else {
 				setRequest(await fetchRequest(String(request.id)));
 				setBlocked(false);
@@ -51,7 +62,7 @@ export function RequestDetails({
 			}
 		} catch (error) {
 			if (
-				action === "refresh" ||
+				action === "refresh" || action === "cancel" ||
 				(error instanceof ApiError && error.status === 404)
 			)
 				setBlocked(true);
@@ -129,7 +140,7 @@ export function RequestDetails({
 						<dd>
 							{request.helperId === null
 								? "No helper assigned"
-								: `Helper #${request.helperId}${request.helperId === 2 ? " (you)" : ""}`}
+								: `Helper #${request.helperId}${request.helperId === userId ? " (you)" : ""}`}
 						</dd>
 					</div>
 					<div>
@@ -143,7 +154,7 @@ export function RequestDetails({
 				</dl>
 			</article>
 			<div className="request-actions">
-				{request.status === "OPEN" && (
+				{request.status === "OPEN" && request.customerId !== userId && (
 					<button
 						type="button"
 						className="button"
@@ -153,6 +164,17 @@ export function RequestDetails({
 						{pending === "accept" ? "Accepting job…" : "Accept Job"}
 					</button>
 				)}
+				{request.customerId === userId &&
+					["OPEN", "ACCEPTED"].includes(request.status) && (
+						<button
+							type="button"
+							className="button secondary"
+							disabled={pending !== null || blocked}
+							onClick={() => act("cancel")}
+						>
+							{pending === "cancel" ? "Cancelling…" : "Cancel request"}
+						</button>
+					)}
 				<button
 					type="button"
 					className="button secondary"

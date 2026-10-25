@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.localdelivery.controller.DeliveryRequestController;
@@ -35,6 +38,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(DeliveryRequestController.class)
+@WithMockUser(username = "1")
 class ApiErrorContractTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
@@ -70,7 +74,7 @@ class ApiErrorContractTest {
     @MethodSource("serviceErrors")
     void businessAndServerFailuresUseTheSameSafeContract(RuntimeException failure, int status, String message)
             throws Exception {
-        when(service.get(1L)).thenThrow(failure);
+        when(service.get(1L, 1L)).thenThrow(failure);
         var body = assertError(mvc.perform(get("/api/requests/1")), status, message);
         assertThat(body.get("fields").isEmpty()).isTrue();
     }
@@ -78,10 +82,10 @@ class ApiErrorContractTest {
     static Stream<Arguments> frameworkErrors() {
         return Stream.of(
                 Arguments.of(get("/api/missing-endpoint"), 404, "Endpoint not found."),
-                Arguments.of(delete("/api/requests/1"), 405, "HTTP method not allowed for this endpoint."),
-                Arguments.of(put("/api/requests/1/status").contentType(MediaType.APPLICATION_JSON)
+                Arguments.of(delete("/api/requests/1").with(csrf()), 405, "HTTP method not allowed for this endpoint."),
+                Arguments.of(put("/api/requests/1/status").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\":\"PICKED_UP\"}"), 405, "HTTP method not allowed for this endpoint."),
-                Arguments.of(post("/api/requests/1/accept").contentType(MediaType.TEXT_PLAIN)
+                Arguments.of(post("/api/requests/1/accept").with(csrf()).with(user("2")).contentType(MediaType.TEXT_PLAIN)
                         .content("{\"helperId\":2}"), 415, "Unsupported request content type. Use application/json."),
                 Arguments.of(get("/api/requests").accept(MediaType.APPLICATION_XML), 406,
                         "Requested response format is not supported.")
@@ -107,20 +111,20 @@ class ApiErrorContractTest {
 
     @Test
     void creationValidationIncludesAllFieldErrors() throws Exception {
-        var body = assertError(mvc.perform(post("/api/requests").contentType(MediaType.APPLICATION_JSON).content("{}")),
+        var body = assertError(mvc.perform(post("/api/requests").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{}")),
                 422, "Validation failed.");
         var fields = new ArrayList<String>();
         body.get("fields").fieldNames().forEachRemaining(fields::add);
-        assertThat(fields).containsExactlyInAnyOrder("customerId", "category", "title", "description",
+        assertThat(fields).containsExactlyInAnyOrder("category", "title", "description",
                 "pickupAddress", "deliveryAddress", "helperReward", "deadline");
         body.get("fields").forEach(message -> assertThat(message.asText()).isNotBlank());
         verifyNoInteractions(service);
     }
 
     @ParameterizedTest
-    @CsvSource({"accept,helperId", "status,status"})
+    @CsvSource({"status,status"})
     void workflowValidationIncludesTheRelevantField(String operation, String field) throws Exception {
-        var request = operation.equals("accept") ? post("/api/requests/1/accept") : patch("/api/requests/1/status");
+        var request = operation.equals("accept") ? post("/api/requests/1/accept").with(csrf()).with(user("2")) : patch("/api/requests/1/status").with(csrf());
         var body = assertError(mvc.perform(request.contentType(MediaType.APPLICATION_JSON).content("{}")),
                 422, "Validation failed.");
         assertThat(body.get("fields").size()).isEqualTo(1);
@@ -139,7 +143,7 @@ class ApiErrorContractTest {
     @ValueSource(strings = {"", "null", "{", "{\"status\":\"private unknown enum\"}",
             "{\"status\":1}", "{\"status\":\"PICKED_UP\",\"privateExtraField\":1}"})
     void malformedAndUnreadableBodiesDoNotLeakParserDetails(String content) throws Exception {
-        var body = assertError(mvc.perform(patch("/api/requests/1/status").contentType(MediaType.APPLICATION_JSON)
+        var body = assertError(mvc.perform(patch("/api/requests/1/status").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content(content)), 422, "Invalid request body or parameter.");
         assertThat(body.get("fields").isEmpty()).isTrue();
         verifyNoInteractions(service);

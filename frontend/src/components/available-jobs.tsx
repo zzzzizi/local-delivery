@@ -1,3 +1,4 @@
+import { requireUser, sessionHeaders } from "../lib/server-api";
 import { LoadingState } from "./loading-state";
 import { StatusBadge } from "./status-badge";
 import Link from "next/link";
@@ -14,9 +15,12 @@ export function JobsLoading() {
 export async function AvailableJobs() {
 	// Fetch per visit, outside prerendering, even when the API is unavailable at build time.
 	await connection();
+	await requireUser();
 	let jobs: AvailableJob[];
 	try {
-		const response = await apiRequest<unknown>("/requests");
+		const response = await apiRequest<unknown>("/requests", {
+			headers: await sessionHeaders(),
+		});
 		if (!isAvailableJobs(response)) {
 			throw new ApiError(
 				502,

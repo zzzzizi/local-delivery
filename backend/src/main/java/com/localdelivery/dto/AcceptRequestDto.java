@@ -3,4 +3,5 @@ package com.localdelivery.dto;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
-public record AcceptRequestDto(@NotNull @Positive Long helperId) {}
+/** Optional legacy ID is checked against the session; new clients send an empty object. */
+public record AcceptRequestDto(@Positive Long helperId) {}

@@ -28,10 +28,10 @@ class ApiErrorTest {
                 new CannotCreateTransactionException("private database details")}) {
             var service = mock(DeliveryRequestService.class);
             when(service.listOpen()).thenThrow(failure);
-            when(service.get(1L)).thenThrow(failure);
-            when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP))).thenThrow(failure);
+            when(service.get(1L, 1L)).thenThrow(failure);
+            when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP), 1L)).thenThrow(failure);
             var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service))
-                    .setControllerAdvice(new ApiExceptionHandler()).build();
+                    .setControllerAdvice(new ApiExceptionHandler()).defaultRequest(get("/").principal(() -> "1")).build();
             for (var request : new MockHttpServletRequestBuilder[]{
                     get("/api/requests"), get("/api/requests/1"),
                     patch("/api/requests/1/status").contentType("application/json").content("{\"status\":\"PICKED_UP\"}")}) {
@@ -46,12 +46,12 @@ class ApiErrorTest {
     @Test
     void concurrentUpdatesReturnSafeConflict() throws Exception {
         var service = mock(DeliveryRequestService.class);
-        when(service.accept(1L, new AcceptRequestDto(2L)))
+        when(service.accept(1L, new AcceptRequestDto(2L), 1L))
                 .thenThrow(new ObjectOptimisticLockingFailureException("private persistence details", null));
-        when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP)))
+        when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP), 1L))
                 .thenThrow(new ObjectOptimisticLockingFailureException("private persistence details", null));
         var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service))
-                .setControllerAdvice(new ApiExceptionHandler()).build();
+                .setControllerAdvice(new ApiExceptionHandler()).defaultRequest(get("/").principal(() -> "1")).build();
         for (var request : new MockHttpServletRequestBuilder[]{
                 post("/api/requests/1/accept").content("{\"helperId\":2}"),
                 patch("/api/requests/1/status").content("{\"status\":\"PICKED_UP\"}")}) {
@@ -66,9 +66,9 @@ class ApiErrorTest {
     @Test
     void handlesDatabaseConflict() throws Exception {
         var service = mock(DeliveryRequestService.class);
-        when(service.get(1L)).thenThrow(new DataIntegrityViolationException("private details"));
+        when(service.get(1L, 1L)).thenThrow(new DataIntegrityViolationException("private details"));
         var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service))
-                .setControllerAdvice(new ApiExceptionHandler()).build();
+                .setControllerAdvice(new ApiExceptionHandler()).defaultRequest(get("/").principal(() -> "1")).build();
         mvc.perform(get("/api/requests/1")).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Request conflicts with existing data."));
     }

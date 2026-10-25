@@ -1,0 +1,63 @@
+name: local-delivery
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-${POSTGRES_DB:-local_delivery}}
+      POSTGRES_USER: ${DB_USERNAME:-${POSTGRES_USER:-local_delivery}}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-}}
+    ports:
+      - "127.0.0.1:${DB_PORT:-${POSTGRES_PORT:-5433}}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 8080
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-${POSTGRES_DB:-local_delivery}}
+      DB_USERNAME: ${DB_USERNAME:-${POSTGRES_USER:-local_delivery}}
+      DB_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-}}
+      SEED_DEMO_USERS: "false"
+      # This Compose setup binds to loopback and serves HTTP. Use true behind HTTPS.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
+
+  frontend:
+    build:
+      context: ./frontend
+    init: true
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/backend-api/health', { signal: AbortSignal.timeout(3000) }).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+
+volumes:
+  postgres_data:

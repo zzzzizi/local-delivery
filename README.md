@@ -1,6 +1,8 @@
-# Local Delivery — Stage 18 complete
+# Local Delivery — Stage 20 complete
 
-A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, and Next.js. Stages 1–18 are complete, including the customer/helper workflow, basic UI improvements, and full-workflow integration testing. The application is working and tested against PostgreSQL, over real HTTP, and in the browser. Stage 19 has not been started.
+A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, PostgreSQL, and Next.js. Stage 20 adds registration, login, logout, password hashing, session authentication, and ownership checks to the existing Docker application. The customer and helper identities now come from the signed-in account.
+
+The stage summaries below record the development history. Stage 20 supersedes earlier demo-ID and unauthenticated API examples; use the current authentication instructions and API table.
 
 Stage 5 is complete, including `AcceptRequestDto` and `UpdateStatusRequest`. Acceptance uses `AcceptRequestDto`; status updates now use `UpdateStatusRequest`.
 
@@ -14,7 +16,7 @@ Stage 9 adds the status PATCH endpoint and centralized transitions through picku
 
 Stage 10 adds an explicit already-accepted exception and a consistent JSON error contract for business errors, validation, Spring MVC request errors, and unexpected server failures. Protocol headers and field validation details are preserved; internal exception details stay out of responses.
 
-Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. Create Request, Available Jobs, and My Requests are now implemented. My Deliveries now runs the completed Stage 16 helper workflow. Authentication, payments, GPS, and chat also remain out of scope.
+Stage 11 provides Home, Create Request, Available Jobs, My Requests, and My Deliveries routes with shared navigation, active-link highlighting, and page titles. Create Request, Available Jobs, and My Requests are now implemented. My Deliveries now runs the completed Stage 16 helper workflow. Authentication is added in Stage 20. Payments, GPS, and chat remain out of scope.
 
 Stage 12 adds the eight-field Create Request form, posts as customer 1, prevents duplicate submissions while pending, shows client/backend validation and server errors, and displays the saved request after success. Deadline entry and display use Oslo time.
 
@@ -30,13 +32,68 @@ Stage 17 improves navigation, responsive cards, status badges, form grouping, lo
 
 Stage 18 adds four real-HTTP integration cases and verifies the complete BUY journey in the browser, from creating a request to the customer seeing Delivered. All 280 backend tests and 126 frontend tests pass.
 
+Stage 19 runs the Java backend, Next.js frontend, and PostgreSQL together with Docker Compose. It preserves the existing database, adds isolated Docker workflow/persistence checks, and updates Next.js to 16.4.3 after the image build identified security advisories in the previous version. All 280 backend and 126 frontend tests pass with the Docker setup verified.
+
+## Stage 20 — authentication and authorization
+
+Open [Create account](http://127.0.0.1:3000/register), register with a name, email, and password of 12–128 characters, then log in. One account can create requests as a customer and accept other users' requests as a helper. My Requests and My Deliveries show only that account's records.
+
+- Spring Security protects delivery APIs. Anonymous API calls return 401; protected frontend pages redirect to Log in.
+- Passwords are stored as salted PBKDF2 hashes. API profiles contain only ID, name, and email. Duplicate emails are rejected case-insensitively.
+- Authentication uses server-side sessions with an HttpOnly, SameSite=Lax `DELIVERY_SESSION` cookie. Login rotates the session ID and CSRF token; logout invalidates the session. Session IDs and passwords are never stored in browser local storage.
+- Every POST/PATCH, including registration, login, and logout, requires a CSRF token from the same session. The frontend handles this automatically.
+- Creation uses the signed-in customer. Acceptance uses the signed-in helper and rejects self-acceptance. Only the customer may cancel an OPEN or ACCEPTED request; only the assigned helper may advance delivery status. Existing transition and concurrency rules still apply.
+- OPEN jobs are visible to signed-in users. Once assigned or closed, details are visible only to the customer and assigned helper. Attempts to access someone else's tracking list return 403.
+- Existing demo users and requests are preserved. Legacy users have a null password hash and cannot log in; no shared or default password is introduced. Register new accounts. Fresh Docker databases do not seed demo users.
+
+The V4 Flyway migration adds `users.password_hash` and a unique case-insensitive email index. No request fields or ownership relationships are rewritten. The nullable hash exists only for compatibility with legacy accounts; all registrations require a password.
+
+Sessions expire after 30 minutes of inactivity and are held in backend memory. A backend restart requires logging in again; accounts and requests remain in PostgreSQL. The local Compose setup binds to loopback and uses HTTP, so its cookie Secure flag is false. Outside this local setup, serve the app over HTTPS and set `SESSION_COOKIE_SECURE=true` (the backend's non-dev default). This stage does not add password recovery, email verification, or distributed session storage.
+
+### Authentication API
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /api/auth/csrf` | Public; creates/reuses a session and returns `{token, headerName}` |
+| `POST /api/auth/register` | `{name, email, password}` → 201 public profile; log in separately |
+| `POST /api/auth/login` | `{email, password}` → 200 public profile and rotated session cookie; invalid credentials → 401 |
+| `GET /api/auth/me` | Current public profile; anonymous → 401 |
+| `POST /api/auth/logout` | Invalidates session and clears cookie → 204 |
+| `GET /api/me/requests` | All requests owned by the current customer |
+| `GET /api/me/deliveries` | All deliveries assigned to the current helper |
+
+For a direct HTTP client, retain `Set-Cookie` values in a cookie jar. Before each mutation, GET `/api/auth/csrf` using that jar, then send the returned token in the named header (`X-CSRF-TOKEN`) with the same cookies. Fetch a new token after login or logout. The browser uses the same-origin `/backend-api` proxy; server-rendered pages forward only the session cookie. API responses are not cached. Swagger remains publicly readable, but executing protected operations requires the authenticated session and CSRF header for mutations.
+
+New clients omit `customerId` when creating and send `{}` when accepting. The DTOs retain optional positive `customerId`/`helperId` fields for compatibility: if supplied, the claim must match the authenticated account or the request returns 403. These fields cannot choose another identity.
+
+### Verify Stage 20
+
+```bash
+# From backend, with Java 21 and PostgreSQL available:
+./mvnw clean test
+# From frontend:
+npm run lint
+npm run typecheck
+npm run test:unit
+# From the repository root, with Docker running:
+node scripts/test-docker.mjs
+```
+
+The Docker script uses a separate project, random local ports, and a disposable database. It registers two test accounts, tests authentication/CSRF/private access, completes BUY/PICKUP/PACKAGE workflows, checks all pages/assets, recreates containers to verify persistence and session invalidation, runs frontend unit/live tests, and verifies logout. Its cleanup removes only its own containers and volume. The live frontend suite receives authenticated fixture cookies and IDs from this script; use `npm run test:unit` for standalone frontend tests.
+
+Verified on 25 October 2026: **296 backend tests**, **111 frontend unit tests plus 21 live tests (132 total)**, lint, TypeScript checks, and production Docker builds all passed. Browser verification covered registration, invalid credentials, login, logout, anonymous redirects, switching accounts, owner/helper controls, and a delivery through DELIVERED. The main database was compared before and after V4: all original fields of its **2 users and 13 requests** were unchanged. Browser test accounts and their request used a separate disposable database.
+
+For a manual browser check, register two accounts and use separate browser profiles or log out between them. Create a request as the customer, verify that its details show Cancel request but no Accept Job, then log in as the helper and accept it. Only that helper's My Deliveries can advance it. The customer sees progress in My Requests. Log out and open My Requests again to verify the login redirect.
+
+Important files: `SecurityConfiguration.java` configures hashing, sessions, CSRF, and route protection; `AuthController.java` and `AccountService.java` implement account operations; `DeliveryRequestService.java` enforces ownership; `V4__user_authentication.sql` preserves legacy data; `SecurityApiTest.java` exercises security through real filters. Frontend `auth-form.tsx`, `auth-menu.tsx`, `lib/server-api.ts`, and `lib/api.ts` handle sign-in and authenticated requests. `request-details.tsx` adds customer cancellation. Existing workflow tests now use authenticated users, and `tests/auth.test.mjs` verifies dynamic identity and CSRF handling.
+
 ## Stack and architecture
 
-- Backend: Java 21, Spring Boot 3.5.16, Spring Web, Spring Data JPA/Hibernate, Jakarta Validation, Maven Wrapper 3.9.16.
+- Backend: Java 21, Spring Boot 3.5.16, Spring Web, Spring Security, Spring Data JPA/Hibernate, Jakarta Validation, Maven Wrapper 3.9.16.
 - Database: PostgreSQL, managed migrations with Flyway, schema validation with Hibernate.
 - API documentation: springdoc OpenAPI and Swagger UI.
 - Tests: JUnit 5, Spring Boot Test, MockMvc, and actual PostgreSQL.
-- Frontend: Next.js, React, TypeScript.
+- Frontend: Next.js 16.4.3, React, TypeScript.
 
 Controllers delegate to transactional services, services use repositories, and repositories persist JPA entities. Controllers return DTOs instead of entities. Dependencies use constructor injection.
 
@@ -44,7 +101,7 @@ Controllers delegate to transactional services, services use repositories, and r
 local-delivery/
 ├── .env.example
 ├── .gitignore
-├── compose.yaml
+├── docker-compose.yml
 ├── README.md
 ├── backend/
 │   ├── pom.xml
@@ -109,6 +166,8 @@ local-delivery/
 
 ## Prerequisites
 
+- For the Docker setup: Docker Desktop (or Docker Engine with Compose v2+) running. Java, Maven, Node.js, and npm are included in the build images and are not needed on the host just to run the application.
+- For local development and the existing test commands, also install the tools below.
 - JDK 21, with `java` on PATH (`java -version`).
 - PostgreSQL available locally. This checkout retains its existing Docker Compose database; Docker Desktop must be running to use it. An independently installed PostgreSQL database also works.
 - Node.js 22.17+ and npm for the frontend. Tests use Node's built-in TypeScript stripping to test the actual API helper without adding a test-runner dependency.
@@ -116,9 +175,32 @@ local-delivery/
 
 No global Maven installation is needed. The wrapper downloads Maven and dependencies on first use. On Windows, use `mvnw.cmd` instead of `./mvnw`.
 
-## Start on this machine
+## Start with Docker (Stage 19)
 
-The existing `.env` and PostgreSQL data have been preserved. Start the database from the project root, then start Java from `backend`:
+From the project root:
+
+```bash
+docker compose up --build -d --wait
+docker compose ps
+```
+
+For a **new checkout**, first copy `.env.example` to `.env` and set a nonempty `DB_PASSWORD`. Preserve an existing `.env` and its database credentials when upgrading. The frontend does not need `.env.local` in Docker. Subsequent `docker compose up` starts the full application; use `--build` after source or dependency changes, and `-d --wait` to run in the background and wait for healthy services.
+
+This machine uses [the website on port 3000](http://127.0.0.1:3000), [API health on port 8081](http://127.0.0.1:8081/api/health), and [Swagger UI on port 8081](http://127.0.0.1:8081/docs). Its ignored `.env` sets `BACKEND_PORT=8081` because an unrelated pgAdmin container already publishes 8080. A fresh checkout defaults to backend port **8080**, frontend **3000**, and database **5433**; adjust `BACKEND_PORT`, `FRONTEND_PORT`, or `DB_PORT` if needed. All published ports bind only to `127.0.0.1`.
+
+`compose.yaml` was renamed to `docker-compose.yml`. The Compose project name (`local-delivery`), database service, PostgreSQL major version, and named volume (`local-delivery_postgres_data`) are preserved. Do not keep an older `compose.yaml` alongside the new file, since Compose would prefer it. Stop any manually running copy of this app before using its ports in Docker.
+
+```bash
+docker compose logs -f backend frontend
+docker compose stop
+docker compose up -d --wait
+```
+
+`docker compose down` removes this project's containers and network but retains the database volume. **Do not add `--volumes` to the normal project's down command unless you intend to delete its database.**
+
+## Optional: run Java and Next.js on the host
+
+For hot reload, stop the Docker application services with `docker compose stop frontend backend`, keep PostgreSQL running, then start Java from `backend`:
 
 ```bash
 cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery
@@ -127,7 +209,7 @@ cd backend
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-Flyway applies migrations at startup, Hibernate validates the schema, and the `dev` profile creates the two demo users if needed. Seeding is repeatable and refuses to overwrite unrelated users occupying their IDs or emails.
+Flyway applies migrations at startup and Hibernate validates the schema. The `dev` profile can retain the historical demo users below; they have no login credentials. Register a new account for authentication. Docker disables demo seeding. Seeding refuses to overwrite unrelated users occupying their IDs or emails.
 
 | ID | Name | Email |
 | --- | --- | --- |
@@ -168,13 +250,16 @@ For a new checkout, copy `.env.example` to `.env` at the project root and fill i
 | `DB_NAME` | `local_delivery` |
 | `DB_USERNAME` | `local_delivery` |
 | `DB_PASSWORD` | Required; no password is hardcoded |
+| `BACKEND_PORT` | Docker host port, default `8080`; this machine uses `8081` |
+| `FRONTEND_PORT` | Docker host port, default `3000` |
 | `SERVER_PORT` | `8080` |
-| `SEED_DEMO_USERS` | `false` outside the dev profile; dev enables seeding |
-| `NEXT_PUBLIC_API_URL` | Set in `frontend/.env.local`; example `http://127.0.0.1:8080/api`, including `/api` |
+| `SEED_DEMO_USERS` | `false` in Docker and outside dev; dev retains legacy demo seeding without passwords |
+| `SESSION_COOKIE_SECURE` | `true` in the backend; `false` for local HTTP dev/Compose. Set `true` with HTTPS. |
+| `NEXT_PUBLIC_API_URL` | Host development: `frontend/.env.local`, e.g. `http://127.0.0.1:8080/api`. Docker builds use `http://backend:8080/api` internally. |
 
 Spring loads the root `.env` when started from `backend`, treating it as Java properties. Use unquoted values. Exported environment variables override file values for the same key. The old `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` names remain supported so the existing installation needs no secret changes; prefer the new `DB_*` keys and avoid defining both families at once.
 
-The retained `compose.yaml` supports either naming family and only runs PostgreSQL. Backend/frontend Docker images have not been added. Its database port is bound to localhost and data stays in the existing named volume. Changing a password in `.env` does not change credentials already stored in an initialized database.
+`docker-compose.yml` supports either database naming family. Inside Docker, the backend always connects to `db:5432`, independently of the host's database address and published port. Both database and backend receive the same configured database name, username, and password at runtime. Set a nonempty password: PostgreSQL refuses to initialize a fresh database without one. Changing a password in `.env` does not change credentials already stored in an initialized database.
 
 For an external PostgreSQL installation, create the configured database and role yourself and omit the Docker commands. The role needs schema/table permissions; test runs also require permission to create and drop their own temporary schemas.
 
@@ -197,21 +282,21 @@ Old URLs and snake_case request bodies are not compatibility aliases. Refresh ol
 | `GET /api/health` | 200, `{"status":"ok"}`; liveness rather than database readiness |
 | `POST /api/requests` | 201, saved request with `status: "OPEN"` and `helperId: null` |
 | `GET /api/requests` | 200, array of OPEN requests, newest first; descending ID breaks timestamp ties |
-| `GET /api/requests/{id}` | 200, complete request regardless of status; 404 if missing |
-| `GET /api/users/{userId}/requests` | 200, all requests created by that customer, newest first; empty array if none; 404 if customer is missing |
-| `GET /api/users/{userId}/deliveries` | All jobs assigned to that helper, newest first; empty array if none; 404 if helper is missing |
-| `POST /api/requests/{id}/accept` | 200, complete accepted request with the chosen helper; 409 if no longer available |
+| `GET /api/requests/{id}` | OPEN jobs visible to signed-in users; other statuses require customer/helper ownership; 404 if missing |
+| `GET /api/users/{userId}/requests` | Legacy alias: userId must equal the signed-in account; prefer `/api/me/requests` |
+| `GET /api/users/{userId}/deliveries` | Legacy alias: userId must equal the signed-in account; prefer `/api/me/deliveries` |
+| `POST /api/requests/{id}/accept` | 200, complete accepted request with the signed-in helper; 409 if no longer available |
 | `PATCH /api/requests/{id}/status` | 200, complete updated request; 409 for invalid transitions or concurrent changes |
 
 Validation preserves the existing behavior:
 
-- All creation fields below are required except `shoppingBudget`, which may be omitted or null.
-- `customerId` must be a positive integer identifying an existing user; a missing customer returns 404.
+- Creation fields below are required except `shoppingBudget` and the legacy `customerId` claim, which may be omitted or null.
+- Identity comes from the session. A supplied `customerId` must be positive and match that identity; another ID returns 403.
 - Category is one of PACKAGE, BUY, or PICKUP. Enum names are case-sensitive; numeric enum values are rejected.
 - Title, description, and addresses must contain text. Surrounding whitespace is stripped. Titles allow 200 characters and addresses allow 500.
 - Amounts are nonnegative with up to eight integer digits and two decimal places. Zero reward is allowed. Response amounts are JSON strings for decimal precision.
 - Deadlines must be in the future. An explicit timezone offset is preferred; a timestamp without one is interpreted in Europe/Oslo. Ambiguous/nonexistent local times during daylight-saving changes require an explicit offset. Responses use UTC (`Z`).
-- Unknown fields are rejected. Creation rejects client-supplied IDs, helper assignments, and status. Acceptance accepts only `helperId`; status updates accept only `status`.
+- Unknown fields are rejected. Creation rejects client-supplied IDs, helper assignments, and status. Acceptance accepts `{}` or an optional matching `helperId`; status updates accept only `status`.
 
 Invalid bodies or path IDs return 422. Database constraint conflicts return 409. Temporary database connection failures return 503 without exposing database exception details. Missing resources return 404. Failed service transactions roll back.
 
@@ -223,13 +308,13 @@ All four planned request/response DTOs are present:
 | --- | --- |
 | `CreateDeliveryRequestRequest` | Validates customer ID, category, required text, amounts, and deadline as described above |
 | `DeliveryRequestResponse` | Complete response containing IDs, request details, amounts, status, and timestamps |
-| `AcceptRequestDto` | `helperId`: required positive `Long`; example `{"helperId":2}` |
+| `AcceptRequestDto` | Optional positive `helperId` claim; new clients send `{}` and use the session identity |
 | `UpdateStatusRequest` | `status`: required `DeliveryStatus`; example `{"status":"PICKED_UP"}` |
 
 The new DTOs use Java records and Jakarta validation:
 
 ```java
-public record AcceptRequestDto(@NotNull @Positive Long helperId) {}
+public record AcceptRequestDto(@Positive Long helperId) {}
 
 public record UpdateStatusRequest(@NotNull DeliveryStatus status) {}
 ```
@@ -245,7 +330,7 @@ cd /Users/yingjizheng/Documents/ChatGPT/LD/local-delivery/backend
 ./mvnw -Dtest=WorkflowDtoValidationTest test
 ```
 
-Expect 34 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that implemented routes appear in OpenAPI while test-only routes remain absent.
+Expect 32 passing cases, including valid helper IDs, every known status, missing/null fields, nonpositive helper IDs, invalid types, overflow, unknown fields, malformed JSON, and invalid enum values. This focused MVC test does not need a database. The full suite also checks numeric category rejection and verifies that implemented routes appear in OpenAPI while test-only routes remain absent.
 
 ## Stage 6 creation API verification
 
@@ -880,6 +965,59 @@ Exact manual workflow:
 
 Stop before Stage 19 until requested.
 
+## Stage 19 — Docker (complete)
+
+### What was built and why
+
+- `docker-compose.yml` replaces the database-only `compose.yaml` and runs `db`, `backend`, and `frontend`. The database must be healthy before Java starts; Java must be healthy before Next.js starts. The frontend health check also exercises its API proxy.
+- `backend/Dockerfile` builds with the committed Maven wrapper and Java 21, then copies only the executable JAR into a Java 21 JRE image. The runtime uses an unprivileged `delivery` user. Database-backed tests run separately because image builds should not require a running database.
+- `frontend/Dockerfile` uses Node 22, `npm ci`, the committed lockfile, and a production Next.js build. `DOCKER_BUILD=true` enables standalone output in `next.config.mjs`; the runtime copies the traced server dependencies, static assets, and public assets and runs as the existing unprivileged `node` user. Normal host development retains its existing build/start behavior.
+- The frontend's server requests and build-time rewrite target `http://backend:8080/api` on the Compose network. Browser requests continue to use the same-origin `/backend-api` path. Changing host ports therefore requires no frontend API URL edit. To change the internal backend service name or port, update the Dockerfile's API URL and rebuild the frontend: Next.js freezes rewrites and public environment variables at build time.
+- Each application's `.dockerignore` includes only build inputs. Root `.env`, frontend `.env.local`, host dependency folders, and host build outputs stay outside the image contexts. Database credentials enter the backend and database only through runtime environment variables; the frontend receives none.
+- `.env.example` documents configurable host ports without storing a password. Both the preferred `DB_*` names and legacy `POSTGRES_*` names remain supported. The database volume and existing records are retained.
+- `scripts/test-docker.mjs` builds a separate, uniquely named Compose project with a generated password, random host ports, and a disposable volume. It tests all three delivery categories through the frontend proxy, validates errors and tracking views, checks assets and unprivileged users, replaces every container to verify persistence, then runs the 126 frontend tests against those containers. Its cleanup removes only that test project's resources.
+
+During the first clean image build, npm reported advisories affecting Next.js 16.3.8. `frontend/package.json` and `package-lock.json` now pin **16.4.3**; the install audit reports zero vulnerabilities. This follows the [Next.js security advisory](https://github.com/vercel/next.js/security/advisories/GHSA-2464-fhr4-w9xw) and [16.4.3 release](https://github.com/vercel/next.js/releases/tag/v16.4.3). No delivery API, schema, or authentication change was needed.
+
+### Verified on 24 October 2026
+
+- Both production images built successfully from their source contexts.
+- `docker compose up --build -d --wait` completed successfully; all three services are healthy.
+- `./mvnw -B -ntp test`: **280 passed**, zero failures, errors, or skips, using isolated PostgreSQL schemas.
+- Frontend lint and TypeScript checks passed. The Docker frontend build passed with Next.js 16.4.3.
+- `node scripts/test-docker.mjs`: passed fresh initialization, BUY/PICKUP/PACKAGE journeys, validation and stale-action errors, customer/helper views, all six page types, production assets, and persistence after `down` followed by `up`. The script's **126 frontend tests passed**, zero failures or skips. Test containers, network, and volume were removed afterward.
+- Browser verification on the main Docker app showed the existing delivery board and successfully refreshed it through the proxy, without console errors.
+- A before/after comparison confirmed **2 users and 13 requests unchanged**, including timestamps and versions. The existing database container and volume were reused. An ignored backup is saved at `backups/stage19-before-docker.sql`.
+- Both supported credential naming families resolve matching database/backend settings. No local environment file is tracked in Git, and the actual database password is absent from the application image configuration and build history.
+
+### Reproduce the checks
+
+With Docker running, start the main app and check its health:
+
+```bash
+docker compose up --build -d --wait
+docker compose ps
+```
+
+For the automated checks, install frontend dependencies with `npm ci` in `frontend` first if needed. From the project root, run:
+
+```bash
+node scripts/test-docker.mjs
+```
+
+Then run `./mvnw test` in `backend` with JDK 21 and the main database running. Run `npm run lint` and `npm run typecheck` in `frontend`. To run just the frontend suite against this machine's main Docker app, use `NEXT_PUBLIC_API_URL=http://127.0.0.1:8081/api npm test` in `frontend`; use port 8080 on a default installation. The isolated Docker script sets its own URLs automatically.
+
+Manual Docker workflow:
+
+1. Run the startup command above and confirm `db`, `backend`, and `frontend` are healthy.
+2. Open [the website](http://127.0.0.1:3000) and [Swagger UI](http://127.0.0.1:8081/docs) on this machine. On a default installation Swagger uses port 8080.
+3. Create a clearly labelled demo request with a future deadline. Choose Shopping and enter both a shopping budget and helper reward to exercise all fields.
+4. Open Available Jobs, open that new request, and select **Accept Job**. It should disappear from the open jobs list and appear in My Deliveries.
+5. In My Deliveries, use **Mark Picked Up → Start Delivery → Mark Delivered**, waiting for each confirmation. My Requests should show the same final Delivered status.
+6. Run `docker compose down`, then `docker compose up -d --wait`, without the `--volumes` option. Reload My Requests and confirm the request still shows Delivered. Existing requests must also remain present.
+
+Stage 19 is complete. Authentication belongs to Stage 20 and has not been started.
+
 ## Manual creation and viewing tests
 
 1. Start PostgreSQL and the Java backend, then open [Swagger UI](http://127.0.0.1:8080/docs).
@@ -1137,12 +1275,22 @@ Stage 18 files:
 - Added `backend/src/test/java/com/localdelivery/DeliveryWorkflowIntegrationTest.java`: four complete-flow HTTP integration cases with isolated PostgreSQL data and cross-view persistence assertions.
 - Updated `README.md`: test coverage, browser results, important code, exact reproduction steps, and commit suggestion.
 
+Stage 19 files:
+
+- Replaced `compose.yaml` with `docker-compose.yml`: all three services, private host bindings, health checks, startup order, runtime settings, and the preserved database volume.
+- Added `backend/Dockerfile` and `backend/.dockerignore`: Java build/runtime stages and restricted build context.
+- Added `frontend/Dockerfile` and `frontend/.dockerignore`: standalone production build/runtime and restricted build context.
+- Updated `frontend/next.config.mjs`: standalone output for Docker builds.
+- Updated `frontend/package.json` and `frontend/package-lock.json`: fixed Next.js 16.4.3 release.
+- Added `scripts/test-docker.mjs`: isolated container workflow, persistence, and frontend regression verification.
+- Updated `.env.example` and `README.md`: host port settings, startup and upgrade instructions, verification, and manual steps.
+
 `.env`, build outputs, dependency folders, IDE files, and database backups are ignored. No commit or push is made automatically. Review with `git status` and `git diff` from the project root.
 
 Suggested commit:
 
 ```text
-test: add end-to-end delivery workflow coverage
+feat: add authentication and authorization
 ```
 
-Stage 18 is complete. Stop before Stage 19 until requested.
+Stage 20 is complete. Stop here. Payments, live GPS, chat, maps, ratings, and other future features remain unimplemented.

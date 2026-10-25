@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 public record CreateDeliveryRequestRequest(
-        @NotNull @Positive Long customerId,
+        @Positive Long customerId,
         @NotNull RequestCategory category,
         @NotBlank @Size(max = 200) String title,
         @NotBlank String description,

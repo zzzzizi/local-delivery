@@ -1,5 +1,8 @@
 package com.localdelivery;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.localdelivery.dto.AcceptRequestDto;
@@ -40,6 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@WithMockUser(username = "1")
 class AcceptRequestApiTest {
     private static final PostgresTestDatabase DATABASE = new PostgresTestDatabase();
 
@@ -76,12 +80,12 @@ class AcceptRequestApiTest {
                 .put("title", "Stage 8 test").put("description", "A test errand")
                 .put("pickupAddress", "Majorstuen, Oslo").put("deliveryAddress", "Frogner, Oslo")
                 .put("helperReward", 80).put("deadline", OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).toString());
-        return json.readTree(mvc.perform(post("/api/requests").contentType("application/json").content(body.toString()))
+        return json.readTree(mvc.perform(post("/api/requests").with(csrf()).contentType("application/json").content(body.toString()))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
     }
 
     private MvcResult accept(long id, long helperId) throws Exception {
-        return mvc.perform(post("/api/requests/" + id + "/accept").contentType("application/json")
+        return mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user(Long.toString(helperId))).contentType("application/json")
                 .content("{\"helperId\":" + helperId + "}")).andReturn();
     }
 
@@ -181,14 +185,14 @@ class AcceptRequestApiTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"{}", "{\"helperId\":null}", "{\"helperId\":0}", "{\"helperId\":-1}",
+    @ValueSource(strings = {"{\"helperId\":0}", "{\"helperId\":-1}",
             "{\"helperId\":1.5}", "{\"helperId\":\"2\"}", "{\"helperId\":true}",
             "{\"helperId\":9223372036854775808}", "{\"helperId\":2,\"status\":\"ACCEPTED\"}",
             "{\"helperId\":2,\"version\":0}", "null", "[]", "{"})
     void invalidBodyReturns422WithoutChangingRequest(String body) throws Exception {
         long id = create(RequestCategory.BUY).get("id").asLong();
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        mvc.perform(post("/api/requests/" + id + "/accept").contentType("application/json").content(body))
+        mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2")).contentType("application/json").content(body))
                 .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.status").value(422));
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
     }
@@ -196,7 +200,7 @@ class AcceptRequestApiTest {
     @ParameterizedTest
     @ValueSource(strings = {"0", "-1", "abc", "1.5", "9223372036854775808"})
     void invalidRequestIdReturns422(String id) throws Exception {
-        mvc.perform(post("/api/requests/" + id + "/accept").contentType("application/json").content("{\"helperId\":2}"))
+        mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2")).contentType("application/json").content("{\"helperId\":2}"))
                 .andExpect(status().isUnprocessableEntity());
     }
 
@@ -228,7 +232,7 @@ class AcceptRequestApiTest {
                         assertThat(initial.getVersion()).isZero();
                         assertThat(initial.getStatus()).isEqualTo(DeliveryStatus.OPEN);
                         await(bothRead);
-                        return service.accept(id, new AcceptRequestDto(helperId));
+                        return service.accept(id, new AcceptRequestDto(helperId), helperId);
                     });
                     return new AcceptanceAttempt(helperId, response, null);
                 } catch (RuntimeException failure) {
