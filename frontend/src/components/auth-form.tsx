@@ -109,6 +109,13 @@ export function AuthForm({ register = false }: { register?: boolean }) {
 			<button className="button" type="submit" disabled={pending}>
 				{pending ? "Please wait…" : register ? "Create account" : "Log in"}
 			</button>
+			{!register && (
+				<p>
+					<Link href="/forgot-password">Forgot password?</Link>
+					{" · "}
+					<Link href="/resend-verification">Resend verification email</Link>
+				</p>
+			)}
 			<p>
 				{register ? "Already registered? " : "New here? "}
 				<Link href={register ? "/login" : "/register"}>

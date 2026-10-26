@@ -1,0 +1,28 @@
+{
+    email {$ACME_EMAIL}
+    admin off
+}
+
+{$APP_DOMAIN} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        X-Robots-Tag "noindex, nofollow"
+        -Server
+    }
+    request_body {
+        max_size 1MB
+    }
+    # No request access log: account tokens, credentials and personal data stay out of logs.
+    handle_path /backend-api/* {
+        rewrite * /api{path}
+        reverse_proxy backend:8080
+    }
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

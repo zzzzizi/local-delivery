@@ -14,7 +14,8 @@ export default async function LoginPage({
 			<p className="intro">Welcome back to your neighbourhood.</p>
 			{registered === "1" && (
 				<p className="success-notice" role="status">
-					Account created. Log in to get started.
+					Account created. Check your email and verify your address before
+					logging in.
 				</p>
 			)}
 			<AuthForm />

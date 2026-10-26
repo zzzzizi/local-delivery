@@ -24,6 +24,23 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(org.springframework.security.authentication.DisabledException.class)
+    ResponseEntity<ApiError> unverified() {
+        return response(HttpStatus.FORBIDDEN, "Verify your email before logging in. You can request a new verification email.", Map.of());
+    }
+
+    @ExceptionHandler(InvalidAccountTokenException.class)
+    ResponseEntity<ApiError> invalidToken(InvalidAccountTokenException error) {
+        return response(HttpStatus.BAD_REQUEST, error.getMessage(), Map.of());
+    }
+
+    @ExceptionHandler(RateLimitException.class)
+    ResponseEntity<ApiError> rateLimited(RateLimitException error) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(error.retryAfter()))
+                .body(errorBody(HttpStatus.TOO_MANY_REQUESTS, error.getMessage(), Map.of()));
+    }
+
     @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
     ResponseEntity<ApiError> unauthenticated() {
         return response(HttpStatus.UNAUTHORIZED, "Invalid email or password. Please log in again.", Map.of());

@@ -22,6 +22,12 @@ public class User {
     @Column(name = "password_hash", length = 255)
     private String passwordHash;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified;
+
+    @Column(name = "session_version", nullable = false)
+    private long sessionVersion;
+
     @Column(length = 32)
     private String phone;
 
@@ -52,6 +58,9 @@ public class User {
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public void setEmail(String email) { this.email = email; }
+
+    public boolean isEmailVerified() { return emailVerified; }
+    public long getSessionVersion() { return sessionVersion; }
 
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }

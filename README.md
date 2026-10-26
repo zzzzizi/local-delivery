@@ -1,6 +1,8 @@
-# Local Delivery — Stage 20 complete
+# Local Delivery — Stage 21 trial preparation
 
 A local peer-to-peer delivery project for Oslo, using Java 21, Spring Boot, Maven, PostgreSQL, and Next.js. Stage 20 adds registration, login, logout, password hashing, session authentication, and ownership checks to the existing Docker application. The customer and helper identities now come from the signed-in account.
+
+Stage 21 adds CI, email verification, password reset, throttling, and deployment/backup preparation. Hosting will be chosen later; nothing has been published. See [the deployment guide](deploy/README.md) and [trial checklist](deploy/TRIAL_CHECKLIST.md).
 
 The stage summaries below record the development history. Stage 20 supersedes earlier demo-ID and unauthenticated API examples; use the current authentication instructions and API table.
 
@@ -36,7 +38,7 @@ Stage 19 runs the Java backend, Next.js frontend, and PostgreSQL together with D
 
 ## Stage 20 — authentication and authorization
 
-Open [Create account](http://127.0.0.1:3000/register), register with a name, email, and password of 12–128 characters, then log in. One account can create requests as a customer and accept other users' requests as a helper. My Requests and My Deliveries show only that account's records.
+Open [Create account](http://127.0.0.1:3000/register), register with a name, email, and password of 12–128 characters, open the verification email in the [local inbox](http://127.0.0.1:8025), confirm your address, then log in. One account can create requests as a customer and accept other users' requests as a helper. My Requests and My Deliveries show only that account's records.
 
 - Spring Security protects delivery APIs. Anonymous API calls return 401; protected frontend pages redirect to Log in.
 - Passwords are stored as salted PBKDF2 hashes. API profiles contain only ID, name, and email. Duplicate emails are rejected case-insensitively.
@@ -48,7 +50,7 @@ Open [Create account](http://127.0.0.1:3000/register), register with a name, ema
 
 The V4 Flyway migration adds `users.password_hash` and a unique case-insensitive email index. No request fields or ownership relationships are rewritten. The nullable hash exists only for compatibility with legacy accounts; all registrations require a password.
 
-Sessions expire after 30 minutes of inactivity and are held in backend memory. A backend restart requires logging in again; accounts and requests remain in PostgreSQL. The local Compose setup binds to loopback and uses HTTP, so its cookie Secure flag is false. Outside this local setup, serve the app over HTTPS and set `SESSION_COOKIE_SECURE=true` (the backend's non-dev default). This stage does not add password recovery, email verification, or distributed session storage.
+Sessions expire after 30 minutes of inactivity and are held in backend memory. A backend restart requires logging in again; accounts and requests remain in PostgreSQL. The local Compose setup binds to loopback and uses HTTP, so its cookie Secure flag is false. Outside this local setup, serve the app over HTTPS and set `SESSION_COOKIE_SECURE=true` (the backend's non-dev default). Stage 21 adds email verification and password recovery. Distributed session storage is still outside this single-instance trial.
 
 ### Authentication API
 
@@ -86,6 +88,39 @@ Verified on 25 October 2026: **296 backend tests**, **111 frontend unit tests pl
 For a manual browser check, register two accounts and use separate browser profiles or log out between them. Create a request as the customer, verify that its details show Cancel request but no Accept Job, then log in as the helper and accept it. Only that helper's My Deliveries can advance it. The customer sees progress in My Requests. Log out and open My Requests again to verify the login redirect.
 
 Important files: `SecurityConfiguration.java` configures hashing, sessions, CSRF, and route protection; `AuthController.java` and `AccountService.java` implement account operations; `DeliveryRequestService.java` enforces ownership; `V4__user_authentication.sql` preserves legacy data; `SecurityApiTest.java` exercises security through real filters. Frontend `auth-form.tsx`, `auth-menu.tsx`, `lib/server-api.ts`, and `lib/api.ts` handle sign-in and authenticated requests. `request-details.tsx` adds customer cancellation. Existing workflow tests now use authenticated users, and `tests/auth.test.mjs` verifies dynamic identity and CSRF handling.
+
+## Stage 21 — trial preparation
+
+The Stage 20 baseline is committed as `a7782e6`. Stage 21 provides:
+
+- GitHub Actions CI on pushes/PRs: Java/PostgreSQL tests, frontend lint/types/unit/build checks, Docker email/workflow/persistence tests, and deployment validation. Hosted runs begin after these files are committed and pushed.
+- Verification emails and password recovery, a local Mailpit inbox, hashed single-use tokens with expiry, invalidation of previous sessions after reset, and bounded login/mail throttling with HTTP 429 and `Retry-After`.
+- Public account pages at `/forgot-password`, `/reset-password`, `/resend-verification`, and `/verify-email`; login links guide users through them. A shared page error boundary supports retry after service failures.
+- Flyway V5 adds `email_verified`, `session_version`, and the token table without rewriting existing user/request fields. Existing password-bearing accounts verify their email using the resend page before logging in again; legacy demo accounts remain unavailable for login/recovery.
+- A standalone HTTPS trial Compose file, SMTP configuration template, readiness endpoint, bounded container logs, backup script with restore verification, health-check command, and a small-user trial checklist. The deployment uses a separate database and keeps internal services off public ports.
+
+Local startup remains `docker compose up --build -d --wait`. Open the [website](http://127.0.0.1:3000) and [captured email inbox](http://127.0.0.1:8025). Messages stay on this computer. To verify the prepared deployment without publishing it, run `node scripts/test-deployment.mjs`. The full Docker test also exercises captured verification/reset emails and backup restoration into a separate database.
+
+Additional API endpoints (all POST, all require CSRF):
+
+| Endpoint | Body | Result |
+| --- | --- | --- |
+| `/api/auth/resend-verification` | `{email}` | 202, generic acknowledgement |
+| `/api/auth/verify-email` | `{token}` | 200; invalid/expired/used token → 400 |
+| `/api/auth/forgot-password` | `{email}` | 202, generic acknowledgement |
+| `/api/auth/reset-password` | `{token, password}` | 200, password updated and earlier sessions invalidated |
+
+`GET /api/health/ready` returns 200 when PostgreSQL is reachable, or 503 without internal details. Full operational instructions, limits, backup restoration, and remaining hosting steps are in [deploy/README.md](deploy/README.md).
+
+Stage 21 local preparation is complete, verified on **26 October 2026**:
+
+- **306 backend tests** and **137 frontend tests** (116 unit + 21 live) passed with zero failures or skips. Frontend lint, TypeScript checks, and production Docker builds passed.
+- The isolated Docker suite verified captured verification/reset emails, single-use tokens, password reset and session invalidation, delivery workflows, restart persistence, and restoration of a database backup into a separate database.
+- The trial deployment configuration and Caddy configuration passed validation; actionlint validated the CI workflow. GitHub-hosted CI has not run yet because these changes have not been committed and pushed.
+- Browser checks on a disposable database covered registration, blocked login before verification, email confirmation, login/logout, reset-email confirmation, the reset form, and removal of tokens from the address bar. Password changes and expired/reused-token rejection were verified by automated tests. No browser warnings or errors were reported during the checked flow.
+- The running local app is healthy at schema V5. A before/after comparison confirmed all pre-existing fields of **3 users and 14 requests** were unchanged. A backup was saved before migration; temporary browser-test data was removed with its separate database.
+
+Hosting, a domain, production SMTP, scheduled offsite backups/monitoring, and invitations remain deferred until the hosting decision. The files and trial checklist are ready for that next step.
 
 ## Stack and architecture
 
@@ -1290,7 +1325,7 @@ Stage 19 files:
 Suggested commit:
 
 ```text
-feat: add authentication and authorization
+feat: prepare local delivery for a user trial
 ```
 
-Stage 20 is complete. Stop here. Payments, live GPS, chat, maps, ratings, and other future features remain unimplemented.
+Stage 21 prepares the local app for a trial. Public deployment and invitations await the hosting decision. Payments, live GPS, chat, maps, ratings, and other future features remain unimplemented.

@@ -13,10 +13,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountService {
     private final UserRepository users;
     private final PasswordEncoder passwords;
+    private final AccountMailService mail;
 
-    public AccountService(UserRepository users, PasswordEncoder passwords) {
+    public AccountService(UserRepository users, PasswordEncoder passwords, AccountMailService mail) {
         this.users = users;
         this.passwords = passwords;
+        this.mail = mail;
     }
 
     @Transactional
@@ -24,7 +26,9 @@ public class AccountService {
         var user = new User(input.name(), input.email());
         user.setPasswordHash(passwords.encode(input.password()));
         // The database's case-insensitive unique index also covers simultaneous sign-ups.
-        return AuthenticatedUser.from(users.saveAndFlush(user));
+        var profile = AuthenticatedUser.from(users.saveAndFlush(user));
+        mail.request(user.getEmail(), AccountTokenService.Purpose.VERIFY_EMAIL);
+        return profile;
     }
 
     @Transactional(readOnly = true)

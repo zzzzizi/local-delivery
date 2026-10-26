@@ -1,0 +1,98 @@
+# Standalone trial deployment: never merge with the local docker-compose.yml.
+name: local-delivery-trial
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: local_delivery
+      POSTGRES_USER: local_delivery
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set a dedicated trial database password}
+    volumes:
+      - trial_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+  backend:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: local_delivery
+      DB_USERNAME: local_delivery
+      DB_PASSWORD: ${DB_PASSWORD:?Set a dedicated trial database password}
+      SEED_DEMO_USERS: "false"
+      SESSION_COOKIE_SECURE: "true"
+      PUBLIC_BASE_URL: https://${APP_DOMAIN:?Set the trial hostname}
+      MAIL_FROM: ${MAIL_FROM:?Set a verified sender email}
+      SMTP_HOST: ${SMTP_HOST:?Set an SMTP provider}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:?Set SMTP credentials}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Set SMTP credentials}
+      SMTP_AUTH: "true"
+      SMTP_STARTTLS: "true"
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/api/health/ready']
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    logging: *logging
+
+  frontend:
+    build:
+      context: ../frontend
+    restart: unless-stopped
+    init: true
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/backend-api/health/ready', { signal: AbortSignal.timeout(3000) }).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+    logging: *logging
+
+  gateway:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set the trial hostname}
+      ACME_EMAIL: ${ACME_EMAIL:?Set your certificate contact email}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - trial_caddy_data:/data
+      - trial_caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    logging: *logging
+
+volumes:
+  trial_postgres:
+  trial_caddy_data:
+  trial_caddy_config:

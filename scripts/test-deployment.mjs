@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const cwd = fileURLToPath(new URL("../", import.meta.url));
+const env = { ...process.env, APP_DOMAIN: "trial.example.com", ACME_EMAIL: "ops@example.com", DB_PASSWORD: "validation-placeholder", MAIL_FROM: "noreply@example.com", SMTP_HOST: "smtp.example.com", SMTP_USERNAME: "validation-placeholder", SMTP_PASSWORD: "validation-placeholder" };
+const result = spawnSync("docker", ["compose", "--env-file", "/dev/null", "-f", "deploy/compose.trial.yml", "config", "--format", "json"], { cwd, env, encoding: "utf8" });
+assert.equal(result.status, 0, result.stderr);
+const config = JSON.parse(result.stdout);
+assert.equal(config.name, "local-delivery-trial");
+for (const service of ["db", "backend", "frontend"]) assert.ok(!config.services[service].ports?.length, `${service} must stay private`);
+assert.equal(config.services.gateway.ports.length, 2);
+assert.equal(config.services.backend.environment.SESSION_COOKIE_SECURE, "true");
+assert.equal(config.services.backend.environment.SMTP_STARTTLS, "true");
+assert.equal(config.services.backend.environment.PUBLIC_BASE_URL, "https://trial.example.com");
+assert.equal(config.services.backend.environment.SEED_DEMO_USERS, "false");
+assert.equal(config.services.backend.environment.SPRINGDOC_SWAGGER_UI_ENABLED, "false");
+for (const service of Object.values(config.services)) assert.equal(service.logging.options["max-size"], "10m");
+const caddy = spawnSync("docker", ["run", "--rm", "--network", "none", "-e", "APP_DOMAIN=trial.example.com", "-e", "ACME_EMAIL=ops@example.com", "-v", `${cwd}deploy/Caddyfile:/etc/caddy/Caddyfile:ro`, "caddy:2.10.2-alpine", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"], { cwd, encoding: "utf8" });
+assert.equal(caddy.status, 0, caddy.stderr);
+console.log("PASS: isolated trial config, private database/API/frontend, secure cookies, SMTP TLS, bounded logs, and valid HTTPS gateway config");

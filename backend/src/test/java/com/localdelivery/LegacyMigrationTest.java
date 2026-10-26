@@ -45,7 +45,7 @@ class LegacyMigrationTest {
                     .isEqualTo(LocalDateTime.parse("2026-10-06T16:00:00"));
             assertThat(jdbc.queryForObject("SELECT updated_at FROM delivery_requests WHERE id=7", LocalDateTime.class))
                     .isEqualTo(LocalDateTime.parse("2026-10-05T17:00:00"));
-            assertThat(flyway.info().current().getVersion().toString()).isEqualTo("4");
+            assertThat(flyway.info().current().getVersion().toString()).isEqualTo("5");
             assertThat(jdbc.queryForObject("SELECT version FROM delivery_requests WHERE id=7", Long.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT version_num FROM alembic_version", String.class)).isEqualTo("0001");
         }
