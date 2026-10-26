@@ -28,12 +28,13 @@ export const accountActions = {
 	},
 } as const;
 
+const isAccountToken = (token: string | undefined): token is string =>
+	!!token && /^[A-Za-z0-9_-]{43}$/.test(token);
+
 export function accountTokenFromHash(hash: string): string {
 	const params = new URLSearchParams(hash.replace(/^#/, ""));
 	const tokens = params.getAll("token");
-	return tokens.length === 1 && /^[A-Za-z0-9_-]{43}$/.test(tokens[0])
-		? tokens[0]
-		: "";
+	return tokens.length === 1 && isAccountToken(tokens[0]) ? tokens[0] : "";
 }
 
 export function accountActionBody(
@@ -50,7 +51,7 @@ export function accountActionBody(
 		if (!email) throw new Error("Enter your email address.");
 		return { email };
 	}
-	if (!values.token || !/^[A-Za-z0-9_-]{43}$/.test(values.token))
+	if (!isAccountToken(values.token))
 		throw new Error(
 			"This link is missing or invalid. Open the link in your latest email, or request a new one.",
 		);

@@ -9,7 +9,7 @@ import {
 	formatOsloDate,
 } from "../lib/create-request";
 import { isCustomerRequests } from "../lib/customer-requests";
-import { RefreshRequestsButton } from "./refresh-requests-button";
+import { RefreshButton } from "./refresh-button";
 
 export async function CustomerRequests() {
 	await connection();
@@ -35,7 +35,7 @@ export async function CustomerRequests() {
 						? error.message
 						: "Unable to reach the delivery service. Please try again."}
 				</p>
-				<RefreshRequestsButton retry />
+				<RefreshButton label="Refresh requests" retry />
 			</div>
 		);
 	}
@@ -46,7 +46,7 @@ export async function CustomerRequests() {
 					{requests.length} {requests.length === 1 ? "request" : "requests"}
 					<span>All statuses · Newest first</span>
 				</p>
-				<RefreshRequestsButton />
+				<RefreshButton label="Refresh requests" />
 			</div>
 			{requests.length === 0 ? (
 				<div className="jobs-feedback">

@@ -3,7 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
-export function RefreshJobsButton({ retry = false }: { retry?: boolean }) {
+export function RefreshButton({
+	label,
+	retry = false,
+}: {
+	label: string;
+	retry?: boolean;
+}) {
 	const router = useRouter();
 	const [pending, startTransition] = useTransition();
 
@@ -15,7 +21,7 @@ export function RefreshJobsButton({ retry = false }: { retry?: boolean }) {
 			aria-live="polite"
 			onClick={() => startTransition(() => router.refresh())}
 		>
-			{pending ? "Refreshing…" : retry ? "Try again" : "Refresh jobs"}
+			{pending ? "Refreshing…" : retry ? "Try again" : label}
 		</button>
 	);
 }

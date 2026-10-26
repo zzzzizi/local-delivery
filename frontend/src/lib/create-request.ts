@@ -4,6 +4,15 @@ export const categoryLabels = {
 	PICKUP: "Pickup",
 } as const;
 
+export const requestStatuses = [
+	"OPEN",
+	"ACCEPTED",
+	"PICKED_UP",
+	"DELIVERING",
+	"DELIVERED",
+	"CANCELLED",
+] as const;
+
 export type RequestCategory = keyof typeof categoryLabels;
 export type RequestValues = {
 	category: string;
@@ -46,13 +55,7 @@ export type DeliveryRequest = Omit<
 	helperId: number | null;
 	shoppingBudget: string | null;
 	helperReward: string;
-	status:
-		| "OPEN"
-		| "ACCEPTED"
-		| "PICKED_UP"
-		| "DELIVERING"
-		| "DELIVERED"
-		| "CANCELLED";
+	status: (typeof requestStatuses)[number];
 	createdAt: string;
 	updatedAt: string;
 };
@@ -112,10 +115,12 @@ export function prepareRequest(
 	};
 }
 
+const osloDateFormat = new Intl.DateTimeFormat("en-GB", {
+	timeZone: "Europe/Oslo",
+	dateStyle: "medium",
+	timeStyle: "short",
+});
+
 export function formatOsloDate(value: string): string {
-	return new Intl.DateTimeFormat("en-GB", {
-		timeZone: "Europe/Oslo",
-		dateStyle: "medium",
-		timeStyle: "short",
-	}).format(new Date(value));
+	return osloDateFormat.format(new Date(value));
 }
