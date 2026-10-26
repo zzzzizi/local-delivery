@@ -1,16 +1,12 @@
 package com.localdelivery.service;
 
 import com.localdelivery.exception.InvalidAccountTokenException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -59,9 +55,11 @@ public class AccountTokenService {
     @Transactional
     public String reset(String token, String password) {
         long id = consume(token, Purpose.RESET_PASSWORD);
-        jdbc.update("UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?", passwords.encode(password), id);
+        String email = jdbc.queryForObject(
+                "UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ? RETURNING email",
+                String.class, passwords.encode(password), id);
         jdbc.update("DELETE FROM account_tokens WHERE user_id = ?", id);
-        return jdbc.queryForObject("SELECT email FROM users WHERE id = ?", String.class, id);
+        return email;
     }
 
     private long consume(String token, Purpose purpose) {
@@ -75,9 +73,5 @@ public class AccountTokenService {
         if (consumed != 1) throw new InvalidAccountTokenException();
         return id;
     }
-    private static String hash(String token) {
-        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(token.getBytes(StandardCharsets.UTF_8))); }
-        catch (NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
-    }
+    private static String hash(String token) { return Sha256.hex(token); }
 }
