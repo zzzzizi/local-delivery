@@ -101,8 +101,12 @@ Use this when you want hot reload. You'll need **JDK 21** and **Node.js 22.17+**
 
    ```bash
    cd backend
-   ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+   ./mvnw spring-boot:run \
+     -Dspring-boot.run.profiles=dev \
+     -Dspring-boot.run.arguments=--app.seed-demo-users=false
    ```
+
+   The `dev` profile enables legacy demo seeding by default. This command disables it so you can reuse your Docker database without startup failures when real accounts already occupy demo user IDs 1 or 2.
 
 3. Start the frontend in a second terminal:
 
@@ -132,7 +136,7 @@ The root `.env` is read by both Docker Compose and the backend. Use unquoted val
 | `SMTP_CAPTURE_PORT` | `1025` | Local SMTP |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:3000` | Used for links in emails |
 | `SESSION_COOKIE_SECURE` | `false` locally | Must be `true` when served over HTTPS |
-| `SEED_DEMO_USERS` | `false` | Legacy demo users (no passwords) in the `dev` profile only |
+| `SEED_DEMO_USERS` | `false` outside `dev` | The `dev` profile explicitly enables legacy demo seeding; use the command-line override above to disable it. Docker disables seeding. |
 
 The frontend's `frontend/.env.local` sets `NEXT_PUBLIC_API_URL` (e.g. `http://127.0.0.1:8080/api`) for host development. Never put secrets in `NEXT_PUBLIC_*` variables. Docker builds configure this automatically.
 
