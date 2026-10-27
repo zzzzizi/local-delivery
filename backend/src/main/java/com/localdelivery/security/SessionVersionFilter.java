@@ -7,9 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
-import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -29,18 +27,14 @@ public class SessionVersionFilter extends OncePerRequestFilter {
                     SecurityContextHolder.clearContext();
                     var session = request.getSession(false);
                     if (session != null) session.invalidate();
-                    error(response, 401, "Unauthorized", "Your session has expired. Please log in again.");
+                    ApiError.write(json, response, HttpStatus.UNAUTHORIZED, "Your session has expired. Please log in again.");
                     return;
                 }
             } catch (org.springframework.dao.DataAccessException failure) {
-                error(response, 503, "Service Unavailable", "Database temporarily unavailable. Try again later.");
+                ApiError.write(json, response, HttpStatus.SERVICE_UNAVAILABLE, "Database temporarily unavailable. Try again later.");
                 return;
             }
         }
         chain.doFilter(request, response);
-    }
-    private void error(HttpServletResponse response, int status, String error, String message) throws IOException {
-        response.setStatus(status); response.setContentType("application/json");
-        json.writeValue(response.getOutputStream(), new ApiError(OffsetDateTime.now(ZoneOffset.UTC), status, error, message, Map.of()));
     }
 }

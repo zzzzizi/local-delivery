@@ -1,5 +1,9 @@
 import { ApiError, apiRequest } from "./api.ts";
-import type { DeliveryRequest } from "./create-request";
+import {
+	type DeliveryRequest,
+	categoryLabels,
+	requestStatuses,
+} from "./create-request.ts";
 
 export function isRequestId(id: string): boolean {
 	return (
@@ -7,39 +11,58 @@ export function isRequestId(id: string): boolean {
 	);
 }
 
+export const isPositiveId = (id: unknown): id is number =>
+	typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+
+export const isMoney = (amount: unknown): amount is string =>
+	typeof amount === "string" && /^\d{1,8}\.\d{2}$/.test(amount);
+
+export const isOffsetDate = (time: unknown): time is string =>
+	typeof time === "string" &&
+	/T.+(?:Z|[+-]\d{2}:\d{2})$/.test(time) &&
+	Number.isFinite(Date.parse(time));
+
+export const isCategory = (category: unknown): boolean =>
+	typeof category === "string" && Object.hasOwn(categoryLabels, category);
+
+const statuses: readonly unknown[] = requestStatuses;
+
 export function isDeliveryRequest(value: unknown): value is DeliveryRequest {
 	if (!value || typeof value !== "object") return false;
 	const request = value as Record<string, unknown>;
-	const positiveId = (id: unknown) =>
-		typeof id === "number" && Number.isSafeInteger(id) && id > 0;
-	const money = (amount: unknown) =>
-		typeof amount === "string" && /^\d{1,8}\.\d{2}$/.test(amount);
-	const date = (time: unknown) =>
-		typeof time === "string" &&
-		/T.+(?:Z|[+-]\d{2}:\d{2})$/.test(time) &&
-		Number.isFinite(Date.parse(time));
 	return (
-		positiveId(request.id) &&
-		positiveId(request.customerId) &&
-		(request.helperId === null || positiveId(request.helperId)) &&
-		typeof request.category === "string" &&
-		["PACKAGE", "BUY", "PICKUP"].includes(request.category) &&
-		typeof request.status === "string" &&
-		[
-			"OPEN",
-			"ACCEPTED",
-			"PICKED_UP",
-			"DELIVERING",
-			"DELIVERED",
-			"CANCELLED",
-		].includes(request.status) &&
+		isPositiveId(request.id) &&
+		isPositiveId(request.customerId) &&
+		(request.helperId === null || isPositiveId(request.helperId)) &&
+		isCategory(request.category) &&
+		statuses.includes(request.status) &&
 		["title", "description", "pickupAddress", "deliveryAddress"].every(
 			(key) => typeof request[key] === "string",
 		) &&
-		(request.shoppingBudget === null || money(request.shoppingBudget)) &&
-		money(request.helperReward) &&
-		[request.deadline, request.createdAt, request.updatedAt].every(date)
+		(request.shoppingBudget === null || isMoney(request.shoppingBudget)) &&
+		isMoney(request.helperReward) &&
+		[request.deadline, request.createdAt, request.updatedAt].every(isOffsetDate)
 	);
+}
+
+/** Reject malformed, duplicate, or mixed-owner list responses for the signed-in user. */
+export function isOwnedRequests(
+	value: unknown,
+	owner: "customerId" | "helperId",
+	userId: number,
+): value is DeliveryRequest[] {
+	if (!Array.isArray(value)) return false;
+	const ids = new Set<number>();
+	return value.every((request) => {
+		if (
+			!isDeliveryRequest(request) ||
+			request[owner] !== userId ||
+			ids.has(request.id)
+		)
+			return false;
+		ids.add(request.id);
+		return true;
+	});
 }
 
 export async function fetchRequest(

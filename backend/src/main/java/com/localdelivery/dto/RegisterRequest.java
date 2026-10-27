@@ -1,7 +1,6 @@
 package com.localdelivery.dto;
 
 import jakarta.validation.constraints.*;
-import java.util.Locale;
 
 public record RegisterRequest(
         @NotBlank @Size(max = 100) String name,
@@ -9,7 +8,7 @@ public record RegisterRequest(
         @NotBlank @Size(min = 12, max = 128) String password) {
     public RegisterRequest {
         name = name == null ? null : name.strip();
-        email = email == null ? null : email.strip().toLowerCase(Locale.ROOT);
+        email = Emails.normalize(email);
     }
     @Override public String toString() { return "RegisterRequest[credentials redacted]"; }
 }

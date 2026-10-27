@@ -3,13 +3,9 @@ package com.localdelivery.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.localdelivery.exception.ApiExceptionHandler.ApiError;
 import com.localdelivery.repository.UserRepository;
-import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Map;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpStatus;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
@@ -89,19 +85,11 @@ public class SecurityConfiguration {
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, error) ->
-                                writeError(json, response, 401, "Unauthorized", "Please log in to continue."))
+                                ApiError.write(json, response, HttpStatus.UNAUTHORIZED, "Please log in to continue."))
                         .accessDeniedHandler((request, response, error) ->
-                                writeError(json, response, 403, "Forbidden", "Access denied or session token expired. Refresh and try again.")))
+                                ApiError.write(json, response, HttpStatus.FORBIDDEN, "Access denied or session token expired. Refresh and try again.")))
                 .logout(logout -> logout.logoutUrl("/api/auth/logout").deleteCookies("DELIVERY_SESSION")
                         .logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
                 .build();
-    }
-
-    private static void writeError(ObjectMapper json, HttpServletResponse response, int status,
-                                   String error, String message) throws IOException {
-        response.setStatus(status);
-        response.setContentType("application/json");
-        json.writeValue(response.getOutputStream(), new ApiError(OffsetDateTime.now(ZoneOffset.UTC),
-                status, error, message, Map.of()));
     }
 }

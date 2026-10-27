@@ -49,10 +49,7 @@ public class DeliveryRequestService {
         request.setHelperReward(input.helperReward());
         request.setDeadline(input.deadline().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime());
         request.setStatus(DeliveryStatus.OPEN);
-        var saved = requests.saveAndFlush(request);
-        // Return PostgreSQL's stored decimal scale and timestamp precision.
-        entityManager.refresh(saved);
-        return DeliveryRequestResponse.from(saved);
+        return persist(request);
     }
 
     @Transactional(readOnly = true)
@@ -81,8 +78,7 @@ public class DeliveryRequestService {
 
     @Transactional
     public DeliveryRequestResponse accept(Long id, AcceptRequestDto input, Long actorId) {
-        var request = requests.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
+        var request = load(id);
         if (request.getHelper() != null || request.getStatus() == DeliveryStatus.ACCEPTED) {
             throw new RequestAlreadyAcceptedException();
         }
@@ -97,16 +93,12 @@ public class DeliveryRequestService {
         }
         request.setHelper(helper);
         request.setStatus(DeliveryStatus.ACCEPTED);
-        // Flush checks @Version before returning; a competing update rolls this transaction back.
-        var saved = requests.saveAndFlush(request);
-        entityManager.refresh(saved);
-        return DeliveryRequestResponse.from(saved);
+        return persist(request);
     }
 
     @Transactional
     public DeliveryRequestResponse updateStatus(Long id, UpdateStatusRequest input, Long actorId) {
-        var request = requests.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
+        var request = load(id);
         var next = input.status();
         var ownerId = next == DeliveryStatus.CANCELLED ? request.getCustomer().getId()
                 : request.getHelper() == null ? null : request.getHelper().getId();
@@ -123,20 +115,30 @@ public class DeliveryRequestService {
             throw new InvalidStatusTransitionException("Delivery request has no assigned helper.");
         }
         request.setStatus(next);
-        var saved = requests.saveAndFlush(request);
-        entityManager.refresh(saved);
-        return DeliveryRequestResponse.from(saved);
+        return persist(request);
     }
 
     @Transactional(readOnly = true)
     public DeliveryRequestResponse get(Long id, Long actorId) {
-        var request = requests.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
+        var request = load(id);
         if (request.getStatus() != DeliveryStatus.OPEN && !request.getCustomer().getId().equals(actorId)
                 && (request.getHelper() == null || !request.getHelper().getId().equals(actorId))) {
             throw new AccessDeniedException("Only request participants may view this request.");
         }
         return DeliveryRequestResponse.from(request);
+    }
+
+    private DeliveryRequest load(Long id) {
+        return requests.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Delivery request not found."));
+    }
+
+    private DeliveryRequestResponse persist(DeliveryRequest request) {
+        // Flush checks @Version now, so a competing update rolls this transaction back.
+        var saved = requests.saveAndFlush(request);
+        // Return PostgreSQL's stored decimal scale and timestamp precision.
+        entityManager.refresh(saved);
+        return DeliveryRequestResponse.from(saved);
     }
 
     public static void checkClaim(Long claimedId, Long actorId) {

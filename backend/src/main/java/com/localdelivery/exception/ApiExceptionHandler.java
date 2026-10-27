@@ -1,6 +1,9 @@
 package com.localdelivery.exception;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
+import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
@@ -24,13 +27,30 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+    public record ApiError(OffsetDateTime timestamp, int status, String error,
+                           String message, Map<String, String> fields) {
+        public static ApiError of(HttpStatusCode status, String message, Map<String, String> fields) {
+            var knownStatus = HttpStatus.resolve(status.value());
+            return new ApiError(OffsetDateTime.now(ZoneOffset.UTC), status.value(),
+                    knownStatus == null ? "Error" : knownStatus.getReasonPhrase(), message, fields);
+        }
+
+        /** For security filters and handlers that run outside Spring MVC. */
+        public static void write(ObjectMapper json, HttpServletResponse response, HttpStatus status,
+                                 String message) throws IOException {
+            response.setStatus(status.value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            json.writeValue(response.getOutputStream(), of(status, message, Map.of()));
+        }
+    }
+
     @ExceptionHandler(org.springframework.security.authentication.DisabledException.class)
     ResponseEntity<ApiError> unverified() {
         return response(HttpStatus.FORBIDDEN, "Verify your email before logging in. You can request a new verification email.", Map.of());
     }
 
-    @ExceptionHandler(InvalidAccountTokenException.class)
-    ResponseEntity<ApiError> invalidToken(InvalidAccountTokenException error) {
+    @ExceptionHandler({InvalidAccountTokenException.class, SelfAcceptanceException.class})
+    ResponseEntity<ApiError> badRequest(RuntimeException error) {
         return response(HttpStatus.BAD_REQUEST, error.getMessage(), Map.of());
     }
 
@@ -50,8 +70,6 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     ResponseEntity<ApiError> forbidden() {
         return response(HttpStatus.FORBIDDEN, "You are not allowed to perform this action.", Map.of());
     }
-    public record ApiError(OffsetDateTime timestamp, int status, String error,
-                           String message, Map<String, String> fields) {}
 
     @ExceptionHandler(ResourceNotFoundException.class)
     ResponseEntity<ApiError> notFound(ResourceNotFoundException error) {
@@ -79,30 +97,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return response(HttpStatus.CONFLICT, "Request conflicts with existing data.", Map.of());
     }
 
-    @ExceptionHandler(RequestNotOpenException.class)
-    ResponseEntity<ApiError> notOpen(RequestNotOpenException error) {
+    @ExceptionHandler({RequestNotOpenException.class, RequestAlreadyAcceptedException.class,
+            InvalidStatusTransitionException.class})
+    ResponseEntity<ApiError> invalidState(RuntimeException error) {
         return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
-    }
-
-    @ExceptionHandler(RequestAlreadyAcceptedException.class)
-    ResponseEntity<ApiError> alreadyAccepted(RequestAlreadyAcceptedException error) {
-        return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
-    }
-
-    @ExceptionHandler(SelfAcceptanceException.class)
-    ResponseEntity<ApiError> selfAcceptance(SelfAcceptanceException error) {
-        return response(HttpStatus.BAD_REQUEST, error.getMessage(), Map.of());
     }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ResponseEntity<ApiError> concurrentUpdate() {
         return response(HttpStatus.CONFLICT,
                 "Delivery request changed during update. Refresh and try again.", Map.of());
-    }
-
-    @ExceptionHandler(InvalidStatusTransitionException.class)
-    ResponseEntity<ApiError> invalidTransition(InvalidStatusTransitionException error) {
-        return response(HttpStatus.CONFLICT, error.getMessage(), Map.of());
     }
 
     @ExceptionHandler({DataAccessResourceFailureException.class, CannotCreateTransactionException.class})
@@ -153,8 +157,6 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     private ApiError errorBody(HttpStatusCode status, String message, Map<String, String> fields) {
-        var knownStatus = HttpStatus.resolve(status.value());
-        return new ApiError(OffsetDateTime.now(ZoneOffset.UTC), status.value(),
-                knownStatus == null ? "Error" : knownStatus.getReasonPhrase(), message, fields);
+        return ApiError.of(status, message, fields);
     }
 }

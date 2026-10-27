@@ -6,7 +6,7 @@ import { connection } from "next/server";
 import { ApiError, apiRequest } from "../lib/api";
 import { type AvailableJob, isAvailableJobs } from "../lib/available-jobs";
 import { categoryLabels, formatOsloDate } from "../lib/create-request";
-import { RefreshJobsButton } from "./refresh-jobs-button";
+import { RefreshButton } from "./refresh-button";
 
 export function JobsLoading() {
 	return <LoadingState message="Loading available jobs…" />;
@@ -37,7 +37,7 @@ export async function AvailableJobs() {
 						? error.message
 						: "Unable to reach the delivery service. Please try again."}
 				</p>
-				<RefreshJobsButton retry />
+				<RefreshButton label="Refresh jobs" retry />
 			</div>
 		);
 	}
@@ -49,7 +49,7 @@ export async function AvailableJobs() {
 					{jobs.length} open {jobs.length === 1 ? "request" : "requests"}
 					<span>Newest first</span>
 				</p>
-				<RefreshJobsButton />
+				<RefreshButton label="Refresh jobs" />
 			</div>
 			{jobs.length === 0 ? (
 				<div className="jobs-feedback">
