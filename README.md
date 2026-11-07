@@ -1,15 +1,15 @@
 # Local Delivery
 
-A peer-to-peer delivery app for Oslo. Neighbours post small jobs (buy groceries, pick something up, deliver a package) and other users accept and complete them for a reward.
+A peer-to-peer delivery app for Oslo. Neighbours post small jobs (buy groceries, pick something up, deliver a package) and other users request them, get customer approval, and complete them for a reward.
 
 One account can act as both roles:
 
 - **Customer** — create a delivery request and track its progress.
-- **Helper** — browse open jobs, accept one, and move it through pickup → delivery → done.
+- **Helper** — browse open jobs, request one, wait for customer approval, and move it through pickup → delivery → done.
 
 The app is being prepared for a small user trial. Hosting hasn't been chosen yet, so nothing is publicly deployed. See the [deployment guide](deploy/README.md) and [trial checklist](deploy/TRIAL_CHECKLIST.md).
 
-**Not included (yet):** payments, live GPS, maps, chat, and ratings.
+**Not included (yet):** payments, live GPS, maps, and ratings.
 
 ---
 
@@ -31,7 +31,7 @@ Then open:
 | API docs (Swagger UI) | http://127.0.0.1:8080/docs |
 | Health check | http://127.0.0.1:8080/api/health |
 
-**Try it out:** register an account, open the verification email in the Mailpit inbox, confirm your address, then log in. To test the full flow, register a second account in another browser profile: one account creates a request, the other accepts and delivers it.
+**Try it out:** register an account, open the verification email in the Mailpit inbox, confirm your address, then log in. To test the full flow, register a second account in another browser profile: one account creates a request; the other selects **Request to help**. The customer opens **My Requests → Review helper requests** and approves the helper, who can then deliver it.
 
 Common commands:
 
@@ -48,6 +48,23 @@ All ports are bound to `127.0.0.1` only. If a port is already in use, change `BA
 
 ---
 
+## Private request chat
+
+Helpers can select **Message customer** on a job before requesting it. Each helper gets a separate private conversation. Customers open **View conversations** on their request, or use **Messages** in the navigation to reply. Starting a chat does not request or reserve the job.
+
+- While a job is open, its customer can talk to each interested helper independently.
+- Once accepted, only the chosen helper's conversation remains writable during delivery. The assigned helper can also start a conversation after acceptance.
+- Completed/cancelled jobs and unselected helpers' conversations retain read-only history.
+- Text messages are limited to 2,000 characters. Active pages check for updates every five seconds; older messages and conversations are paginated.
+- Session authentication, CSRF, participant checks, rate limits (30 new messages/minute, 20 new conversations/15 minutes per user), and idempotent send retries protect the API. Message text is rendered as plain text.
+- This version has no attachments, unread badges, email/push notifications, read receipts, blocking/reporting, or end-to-end encryption. Open Messages to see new conversations automatically.
+
+API: `POST /api/requests/{id}/conversation`, `GET /api/conversations?page=0&requestId=...`, `GET /api/conversations/{id}`, and `GET/POST /api/conversations/{id}/messages`. History accepts `before` or `after` message IDs (50 messages/page); the inbox has 25 conversations/page, newest conversation first. A send body contains `body` and a UUID `clientMessageId`; repeat the same pair to retry an uncertain send. Sender and customer identities come from the authenticated account and request.
+
+V6 adds `conversations` and `chat_messages`, preserving accounts and delivery records. Docker integration tests cover chat through the frontend proxy, read-only completion, restart persistence, and backup restoration.
+
+---
+
 ## Tech stack
 
 | Layer | Technology |
@@ -59,7 +76,7 @@ All ports are bound to `127.0.0.1` only. If a port is already in use, change `BA
 | Email (local) | Mailpit captures all outgoing mail |
 | CI | GitHub Actions |
 
-The backend follows a standard layered design: controllers → transactional services → repositories → JPA entities. Controllers return DTOs, never entities.
+The backend follows a standard layered design: controllers → transactional services → repositories → JPA entities. Controllers return DTOs, never entities. Chat uses transactional JDBC queries to serialize message writes with the existing JPA delivery workflow.
 
 ```text
 local-delivery/
@@ -168,16 +185,21 @@ CI runs all of the above on every push and pull request (see [.github/workflows/
 ### Delivery lifecycle
 
 ```text
-OPEN ──accept──▶ ACCEPTED ──▶ PICKED_UP ──▶ DELIVERING ──▶ DELIVERED
+OPEN ──customer approves helper──▶ ACCEPTED ──▶ PICKED_UP ──▶ DELIVERING ──▶ DELIVERED
   │                 │
   └──── cancel ─────┴──▶ CANCELLED
 ```
 
-- Only **another user** can accept a request — you can't accept your own.
+- A helper selects **Request to help**. This creates a `PENDING` application; the job remains `OPEN` with no assigned helper, and multiple helpers can apply.
+- The **customer** approves one helper from the request details. Only this approval changes the job to `ACCEPTED` and assigns the helper; other pending applications become `NOT_SELECTED`.
+- Customers can decline a pending application. Helpers can withdraw their own pending application and reapply while the job is open. Declined applications cannot be resubmitted.
+- Pending applications appear under **My Deliveries → Your helper requests**. Use **Refresh helper requests** to check a decision, and **Refresh deliveries** to load newly assigned jobs. There are no email/push notifications for applications.
+- Cancelling an open job marks its pending applications `CANCELLED`, preserving their history. Existing assigned jobs remain assigned after upgrading; they do not need approval again.
+- You cannot request your own job. Applying is limited to 20 new/reopened applications per 15 minutes per user.
 - Only the **assigned helper** can advance the status.
 - Only the **customer** can cancel, and only before pickup.
 - `DELIVERED` and `CANCELLED` are final.
-- If two people act at the same time (e.g. two helpers accept the same job), exactly one wins and the other gets `409 Conflict`. This uses optimistic locking.
+- Competing approvals are serialized on the request row; only one helper can be approved. Approval also increments the request version so stale cancellation/delivery updates cannot overwrite it. Duplicate submissions and decisions are idempotent.
 
 Request categories are `PACKAGE`, `BUY`, and `PICKUP`.
 
@@ -210,7 +232,13 @@ Full interactive docs are at `/docs` (Swagger UI); the raw spec is at `/api/open
 | `GET` | `/api/requests` | Open jobs, newest first |
 | `POST` | `/api/requests` | Create a request as the signed-in customer |
 | `GET` | `/api/requests/{id}` | Request details |
-| `POST` | `/api/requests/{id}/accept` | Accept a job (body: `{}`) |
+| `POST` | `/api/requests/{id}/applications` | Request customer approval (body: `{}`) |
+| `POST` | `/api/requests/{id}/accept` | Compatibility alias for applying; returns an application, never assigns a helper |
+| `GET` | `/api/requests/{id}/applications?page=0` | Customer sees applicants; helpers see only their own application (25/page) |
+| `GET` | `/api/me/applications?page=0` | My application history (25/page) |
+| `POST` | `/api/requests/{id}/applications/{applicationId}/approve` | Customer approves helper; returns updated delivery request |
+| `POST` | `/api/requests/{id}/applications/{applicationId}/decline` | Customer declines pending application |
+| `POST` | `/api/requests/{id}/applications/{applicationId}/withdraw` | Helper withdraws their own pending application |
 | `PATCH` | `/api/requests/{id}/status` | Change status, e.g. `{"status":"PICKED_UP"}` |
 | `GET` | `/api/me/requests` | Requests I created |
 | `GET` | `/api/me/deliveries` | Jobs I'm delivering |
@@ -281,7 +309,7 @@ Internal details (stack traces, SQL errors) are never included in responses.
 
 ## Database
 
-- Schema changes are managed by Flyway migrations in [backend/src/main/resources/db/migration](backend/src/main/resources/db/migration) (V1–V5). They run automatically on startup.
+- Schema changes are managed by Flyway migrations in [backend/src/main/resources/db/migration](backend/src/main/resources/db/migration) (V1–V7). They run automatically on startup.
 - Money is stored as `NUMERIC(10,2)`; timestamps are stored in UTC.
 - To back up the database, use [scripts/backup-database.sh](scripts/backup-database.sh). Restore steps are in the [deployment guide](deploy/README.md).
 - Older demo users (from before accounts existed) are kept but have no password and can't log in. Register a new account instead.

@@ -164,9 +164,11 @@ class CustomerRequestsApiTest {
     void trackingReflectsCommittedAcceptanceAndDeliveryUpdates() throws Exception {
         long id = create(1, RequestCategory.PICKUP).get("id").asLong();
         assertThat(list(1).get(0).get("status").asText()).isEqualTo("OPEN");
-        JsonNode accepted = json.readTree(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2"))
+        JsonNode application = json.readTree(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2"))
                 .contentType("application/json").content("{\"helperId\":2}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        JsonNode accepted = json.readTree(mvc.perform(post("/api/requests/" + id + "/applications/" + application.get("id").asLong() + "/approve")
+                .with(csrf()).with(user("1"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         assertThat(list(1).get(0)).isEqualTo(accepted);
         assertThat(list(2)).isEmpty();
         for (String state : new String[]{"PICKED_UP", "DELIVERING", "DELIVERED"}) {

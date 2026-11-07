@@ -189,7 +189,7 @@ test("the proxy forwards method and body and preserves validation errors without
 	assert.equal(typeof error.fields.title, "string");
 });
 
-test("request detail route renders live request fields and acceptance controls", async (t) => {
+test("request detail route renders live request fields and helper-request controls", async (t) => {
 	const jobs = await apiRequest("/requests");
 	if (!jobs.length)
 		return t.skip("No OPEN requests available in this database.");
@@ -218,7 +218,7 @@ test("request detail route renders live request fields and acceptance controls",
 	]) {
 		assert.ok(html.includes(escape(value)), `Missing detail: ${value}`);
 	}
-	assert.match(html, />Accept Job<\/button>/);
+	assert.match(html, />Request to help<\/button>/);
 	assert.match(html, />Refresh request<\/button>/);
 	assert.match(html, /href="\/jobs"/);
 });
@@ -229,7 +229,7 @@ for (const id of ["9223372036854775807", "invalid-id"]) {
 		const html = await response.text();
 		assert.match(html, /Request not found/);
 		assert.match(html, /name="robots" content="noindex"/);
-		assert.doesNotMatch(html, />Accept Job<\/button>/);
+		assert.doesNotMatch(html, />Request to help<\/button>/);
 		assert.match(html, /href="\/jobs"/);
 	});
 }
@@ -293,7 +293,7 @@ test("customer tracking cards match every live API request in order", async () =
 			request.deadline,
 		);
 	}
-	assert.doesNotMatch(html, />Accept Job<\/button>|>Mark Delivered<\/button>/);
+	assert.doesNotMatch(html, />Request to help<\/button>|>Mark Delivered<\/button>/);
 });
 
 test("customer tracking is available through the same-origin proxy", async () => {

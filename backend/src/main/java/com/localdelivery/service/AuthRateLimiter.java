@@ -30,6 +30,9 @@ public class AuthRateLimiter {
         allow("mail:" + Sha256.hex(email), 3, Duration.ofMinutes(15));
     }
     public void token() { allow("token:all", 100, Duration.ofMinutes(15)); }
+    public void chatStart(long userId) { allow("chat-start:" + userId, 20, Duration.ofMinutes(15)); }
+    public void chatMessage(long userId) { allow("chat-message:" + userId, 30, Duration.ofMinutes(1)); }
+    public void jobApplication(long userId) { allow("job-application:" + userId, 20, Duration.ofMinutes(15)); }
     synchronized void allow(String key, int limit, Duration duration) {
         if (!enabled) return;
         long now = clock.millis();

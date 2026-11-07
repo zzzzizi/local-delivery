@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -122,7 +122,7 @@ function verifyBackup() {
       cwd, env, input: readFileSync(path), encoding: "utf8",
     });
     assert.equal(restored.status, 0, restored.stderr);
-    const query = "SELECT json_build_object('users',(SELECT json_agg(u ORDER BY id) FROM users u),'requests',(SELECT json_agg(r ORDER BY id) FROM delivery_requests r))";
+    const query = "SELECT json_build_object('users',(SELECT json_agg(u ORDER BY id) FROM users u),'requests',(SELECT json_agg(r ORDER BY id) FROM delivery_requests r),'conversations',(SELECT json_agg(c ORDER BY id) FROM conversations c),'messages',(SELECT json_agg(m ORDER BY id) FROM chat_messages m),'applications',(SELECT json_agg(a ORDER BY id) FROM job_applications a))";
     const read = db => compose(["exec", "-T", "db", "sh", "-c", 'psql -U "$POSTGRES_USER" -d "$1" -At -c "$2"', "sh", db, query], true);
     assert.equal(read("backup_check"), read(env.DB_NAME), "Restored accounts and requests must match the source database");
     console.log("PASS: backup refuses overwrite and restores matching records into a separate database");
@@ -174,16 +174,34 @@ try {
   await api("/requests", { method: "POST", body: {}, status: 422 });
   await api("/requests/999999", { status: 404 });
   const completed = [];
+  const chatHistory = [];
   for (const category of ["BUY", "PICKUP", "PACKAGE"]) {
     let current = await create(category);
     const path = `/requests/${current.id}`;
     assert.equal(current.status, "OPEN");
     assert.ok((await api("/requests")).some(row => row.id === current.id));
-    current = await api(`${path}/accept`, { method: "POST", body: {} });
+    const conversation = await api(`${path}/conversation`, { method: "POST", actor: "helper" });
+    assert.equal((await api(`${path}/conversation`, { method: "POST", actor: "helper" })).id, conversation.id);
+    const messagePath = `/conversations/${conversation.id}/messages`;
+    const question = { body: "Can I collect this before 17:00?", clientMessageId: randomUUID() };
+    const savedMessage = await api(messagePath, { method: "POST", actor: "helper", body: question });
+    assert.deepEqual(await api(messagePath, { method: "POST", actor: "helper", body: question }), savedMessage);
+    await api(messagePath, { method: "POST", actor: "customer", body: { body: "Yes, that works. Thank you!", clientMessageId: randomUUID() } });
+    const history = await api(messagePath, { actor: "helper" });
+    assert.equal(history.items.length, 2);
+    chatHistory.push({ id: conversation.id, history });
+    const application = await api(`${path}/applications`, { method: "POST", actor: "helper", body: {} });
+    assert.equal(application.status, "PENDING");
+    assert.equal((await api(path)).status, "OPEN");
+    assert.equal((await api(path)).helperId, null);
+    assert.ok(!(await api("/me/deliveries")).some(row => row.id === current.id));
+    await api(`${path}/status`, { method: "PATCH", body: { status: "PICKED_UP" }, status: 403 });
+    await api(`${path}/applications/${application.id}/approve`, { method: "POST", actor: "helper", body: {}, status: 403 });
+    current = await api(`${path}/applications/${application.id}/approve`, { method: "POST", actor: "customer", body: {} });
     assert.equal(current.status, "ACCEPTED");
     assert.equal(current.helperId, helperId);
     assert.equal(current.customerId, customerId);
-    await api(`${path}/accept`, { method: "POST", body: {}, status: 409 });
+    assert.equal((await api(`${path}/accept`, { method: "POST", body: {} })).status, "APPROVED");
     await api(`${path}/status`, { method: "PATCH", body: { status: "DELIVERED" }, status: 409 });
     for (const status of ["PICKED_UP", "DELIVERING", "DELIVERED"]) {
       current = await api(`${path}/status`, { method: "PATCH", body: { status } });
@@ -194,14 +212,18 @@ try {
     for (const listing of ["/me/requests", "/me/deliveries"]) {
       assert.deepEqual((await api(listing)).find(row => row.id === current.id), current);
     }
+    await api(messagePath, { method: "POST", actor: "helper", body: { body: "Closed", clientMessageId: randomUUID() }, status: 409 });
+    assert.equal((await api(`/conversations/${conversation.id}`)).canSend, false);
     completed.push(current);
-    console.log(`PASS: ${category} through create, accept, pickup, delivery, completion, and both tracking views`);
+    console.log(`PASS: ${category} through create, helper request, customer approval, pickup, delivery, completion, and both tracking views`);
   }
   // Keep a waiting and an assigned request to exercise populated pages in the live suite.
   const waiting = await create("BUY");
   const assigned = await create("PACKAGE");
-  await api(`/requests/${assigned.id}/accept`, { method: "POST", body: {} });
-  for (const path of ["/", "/jobs", "/requests/new", "/my-requests", "/my-deliveries", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email", "/resend-verification", `/requests/${waiting.id}`]) {
+  const assignedApplication = await api(`/requests/${assigned.id}/applications`, { method: "POST", actor: "helper", body: {} });
+  await api(`/requests/${assigned.id}/applications/${assignedApplication.id}/approve`, { method: "POST", actor: "customer", body: {} });
+  await api(`/requests/${waiting.id}/applications`, { method: "POST", actor: "helper", body: {} });
+  for (const path of ["/messages", `/messages/${chatHistory[0].id}`, "/", "/jobs", "/requests/new", "/my-requests", "/my-deliveries", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email", "/resend-verification", `/requests/${waiting.id}`]) {
     const response = await fetch(`${frontend}${path}`, { headers: { Cookie: actors[path === "/my-deliveries" ? "helper" : "customer"].cookie }, signal: AbortSignal.timeout(15000) });
     assert.equal(response.status, 200, path);
     const html = await response.text();
@@ -220,6 +242,7 @@ try {
 
   verifyBackup();
   const before = await api("/me/requests");
+  const applicationsBefore = await api("/me/applications", { actor: "helper" });
   // Removing containers (not the volume) proves persistence across full replacement.
   compose(["down"]);
   compose(["up", "-d", "--wait", "--wait-timeout", "180"]);
@@ -230,10 +253,12 @@ try {
   await login("customer");
   await login("helper");
   assert.deepEqual(await api("/me/requests"), before);
+  assert.deepEqual(await api("/me/applications", { actor: "helper" }), applicationsBefore);
   for (const request of completed) {
     assert.deepEqual(await api(`/requests/${request.id}`), request);
   }
-  console.log("PASS: accounts and requests survive container replacement; sessions require a fresh login");
+  for (const { id, history } of chatHistory) assert.deepEqual(await api(`/conversations/${id}/messages`), history);
+  console.log("PASS: accounts, requests and private messages survive container replacement; sessions require a fresh login");
 
   const tests = spawnSync("npm", ["test"], {
     cwd: fileURLToPath(new URL("../frontend/", import.meta.url)),

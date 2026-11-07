@@ -3,7 +3,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { apiRequest } from "../src/lib/api.ts";
 import { isCustomerRequests } from "../src/lib/customer-requests.ts";
 import { isHelperDeliveries, deliveryAction } from "../src/lib/helper-deliveries.ts";
-import { acceptJob } from "../src/lib/request-details.ts";
+import { requestJob } from "../src/lib/job-applications.ts";
 
 const originalUrl = process.env.NEXT_PUBLIC_API_URL;
 beforeEach(() => { process.env.NEXT_PUBLIC_API_URL = "https://example.test/api"; });
@@ -29,12 +29,12 @@ test("delivery ownership and actions use the actual helper's identity", () => {
   assert.equal(deliveryAction(request, 41), null);
   assert.equal(deliveryAction(request, 83).status, "PICKED_UP");
 });
-test("acceptance uses the session without sending a helper ID", async t => {
+test("requesting a job uses the session without sending a helper ID", async t => {
   t.mock.method(globalThis, "fetch", async (_url, options) => {
     if (options.method === "POST") assert.deepEqual(JSON.parse(options.body), {});
-    return Response.json(request);
+    return Response.json({ id: 1, requestId: 37, requestTitle: "Test", requestStatus: "OPEN", customerId: 41, helperId: 83, helperName: "Helper", status: "PENDING", createdAt: request.createdAt, updatedAt: request.updatedAt });
   });
-  assert.equal((await acceptJob("37", 83)).kind, "success");
+  assert.equal((await requestJob(37, 83)).status, "PENDING");
 });
 test("browser mutations fetch a CSRF token and preserve JSON", async t => {
   globalThis.window = {};

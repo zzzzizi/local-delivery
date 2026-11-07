@@ -46,14 +46,15 @@ class ApiErrorTest {
     @Test
     void concurrentUpdatesReturnSafeConflict() throws Exception {
         var service = mock(DeliveryRequestService.class);
-        when(service.accept(1L, new AcceptRequestDto(2L), 1L))
+        var applications = mock(com.localdelivery.service.JobApplicationService.class);
+        when(applications.approve(1L, 2L, 1L))
                 .thenThrow(new ObjectOptimisticLockingFailureException("private persistence details", null));
         when(service.updateStatus(1L, new UpdateStatusRequest(DeliveryStatus.PICKED_UP), 1L))
                 .thenThrow(new ObjectOptimisticLockingFailureException("private persistence details", null));
-        var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service))
+        var mvc = MockMvcBuilders.standaloneSetup(new DeliveryRequestController(service), new com.localdelivery.controller.JobApplicationController(applications))
                 .setControllerAdvice(new ApiExceptionHandler()).defaultRequest(get("/").principal(() -> "1")).build();
         for (var request : new MockHttpServletRequestBuilder[]{
-                post("/api/requests/1/accept").content("{\"helperId\":2}"),
+                post("/api/requests/1/applications/2/approve").content("{}"),
                 patch("/api/requests/1/status").content("{\"status\":\"PICKED_UP\"}")}) {
             mvc.perform(request.contentType("application/json"))
                 .andExpect(status().isConflict())

@@ -113,7 +113,7 @@ export function DeliveryBoard({
 			{deliveries.length === 0 ? (
 				<div className="jobs-feedback">
 					<h2>No deliveries yet</h2>
-					<p>Accept an available job to start helping a neighbour.</p>
+					<p>Request an available job. It will appear here after the customer approves you.</p>
 					<Link className="text-link" href="/jobs" prefetch={false}>
 						Find available jobs <span aria-hidden="true">↗</span>
 					</Link>

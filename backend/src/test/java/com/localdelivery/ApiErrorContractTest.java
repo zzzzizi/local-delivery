@@ -37,12 +37,13 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(DeliveryRequestController.class)
+@WebMvcTest({DeliveryRequestController.class, com.localdelivery.controller.JobApplicationController.class})
 @WithMockUser(username = "1")
 class ApiErrorContractTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @MockitoBean DeliveryRequestService service;
+    @MockitoBean com.localdelivery.service.JobApplicationService applications;
 
     static Stream<Arguments> serviceErrors() {
         return Stream.of(

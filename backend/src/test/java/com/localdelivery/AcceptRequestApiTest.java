@@ -64,7 +64,7 @@ class AcceptRequestApiTest {
     @Autowired UserRepository users;
     @Autowired DeliveryRequestRepository requests;
     @Autowired DemoUserService demoUsers;
-    @Autowired DeliveryRequestService service;
+    @Autowired com.localdelivery.service.JobApplicationService applications;
     @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
@@ -85,8 +85,13 @@ class AcceptRequestApiTest {
     }
 
     private MvcResult accept(long id, long helperId) throws Exception {
-        return mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user(Long.toString(helperId))).contentType("application/json")
-                .content("{\"helperId\":" + helperId + "}")).andReturn();
+        var submitted = mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user(Long.toString(helperId)))
+                .contentType("application/json").content("{\"helperId\":" + helperId + "}")).andReturn();
+        if (submitted.getResponse().getStatus() != 200) return submitted;
+        long applicationId = json.readTree(submitted.getResponse().getContentAsString()).get("id").asLong();
+        long customerId = jdbc.queryForObject("SELECT customer_id FROM delivery_requests WHERE id = ?", Long.class, id);
+        return mvc.perform(post("/api/requests/" + id + "/applications/" + applicationId + "/approve")
+                .with(csrf()).with(user(Long.toString(customerId)))).andReturn();
     }
 
     @ParameterizedTest
@@ -168,6 +173,11 @@ class AcceptRequestApiTest {
         assertThat(accept(id, 2).getResponse().getStatus()).isEqualTo(200);
         var before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
         var result = accept(id, helperId);
+        if (helperId == 2) {
+            assertThat(result.getResponse().getStatus()).isEqualTo(200);
+            assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
+            return;
+        }
         assertThat(result.getResponse().getStatus()).isEqualTo(409);
         assertThat(result.getResolvedException()).isInstanceOf(RequestAlreadyAcceptedException.class);
         assertThat(json.readTree(result.getResponse().getContentAsString()).get("message").asText())
@@ -221,6 +231,7 @@ class AcceptRequestApiTest {
     @Timeout(30)
     void competingTransactionsReadingSameVersionCannotBothAccept() throws Exception {
         long id = create(RequestCategory.BUY).get("id").asLong();
+        var applicationIds = java.util.Map.of(2L, applications.apply(id, 2).id(), 3L, applications.apply(id, 3).id());
         var bothRead = new CyclicBarrier(2);
         var executor = Executors.newFixedThreadPool(2);
         try {
@@ -232,7 +243,7 @@ class AcceptRequestApiTest {
                         assertThat(initial.getVersion()).isZero();
                         assertThat(initial.getStatus()).isEqualTo(DeliveryStatus.OPEN);
                         await(bothRead);
-                        return service.accept(id, new AcceptRequestDto(helperId), helperId);
+                        return applications.approve(id, applicationIds.get(helperId), 1);
                     });
                     return new AcceptanceAttempt(helperId, response, null);
                 } catch (RuntimeException failure) {
@@ -244,7 +255,7 @@ class AcceptRequestApiTest {
             var losers = results.stream().filter(result -> result.failure() != null).toList();
             assertThat(winners).hasSize(1);
             assertThat(losers).hasSize(1);
-            assertThat(losers.getFirst().failure()).isInstanceOf(OptimisticLockingFailureException.class);
+            assertThat(losers.getFirst().failure()).isInstanceOf(RequestAlreadyAcceptedException.class);
             assertWinner(id, winners.getFirst().helperId());
         } finally {
             executor.shutdownNow();

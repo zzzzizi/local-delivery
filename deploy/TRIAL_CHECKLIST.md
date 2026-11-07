@@ -14,7 +14,10 @@ Start with 3–5 volunteers on a dedicated test URL using fictional names, picku
 ## Customer/helper journey
 
 - Customer creates a BUY, PICKUP, or PACKAGE request, sees it in My Requests, and cannot accept it themselves.
-- A different helper sees and accepts the OPEN job. It leaves Available Jobs and appears in that helper's My Deliveries.
+- Two different helpers can request the OPEN job. It stays in Available Jobs, with no assigned helper and no pickup/delivery action allowed.
+- Customer reviews helper requests and approves one. The job leaves Available Jobs and appears in that helper's assigned My Deliveries; the other sees “Another helper was chosen”.
+- Only the customer can approve/decline, and only the applicant can withdraw. Check that declining or withdrawing leaves the job open, and cancellation closes pending applications.
+- Check chat before approval and during the delivery. Unselected helpers retain only their own read-only chat history.
 - A third user cannot view its private details or either person's tracking list.
 - Helper progresses through Picked up, Delivering, and Delivered. Customer sees each update after refreshing.
 - Customer can cancel a separate OPEN/ACCEPTED request. Helper cannot cancel it, and customer cannot advance delivery status.

@@ -90,7 +90,10 @@ export async function CustomerRequests() {
 									</div>
 								</dl>
 								<span className="job-card-action">
-									View request <span aria-hidden="true">↗</span>
+									{request.status === "OPEN"
+										? "Review helper requests"
+										: "View request"}{" "}
+									<span aria-hidden="true">↗</span>
 								</span>
 							</Link>
 						</li>

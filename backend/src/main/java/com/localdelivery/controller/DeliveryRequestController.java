@@ -1,7 +1,6 @@
 package com.localdelivery.controller;
 
 import com.localdelivery.dto.CreateDeliveryRequestRequest;
-import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
 import com.localdelivery.dto.UpdateStatusRequest;
 import com.localdelivery.service.DeliveryRequestService;
@@ -32,12 +31,6 @@ public class DeliveryRequestController {
     @GetMapping
     public List<DeliveryRequestResponse> list() {
         return service.listOpen();
-    }
-
-    @PostMapping("/{id}/accept")
-    public DeliveryRequestResponse accept(@PathVariable @Positive Long id,
-                                          @Valid @RequestBody AcceptRequestDto request, Principal principal) {
-        return service.accept(id, request, Long.valueOf(principal.getName()));
     }
 
     @PatchMapping("/{id}/status")

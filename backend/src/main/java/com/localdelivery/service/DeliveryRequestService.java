@@ -1,14 +1,10 @@
 package com.localdelivery.service;
 
 import com.localdelivery.dto.CreateDeliveryRequestRequest;
-import com.localdelivery.dto.AcceptRequestDto;
 import com.localdelivery.dto.DeliveryRequestResponse;
 import com.localdelivery.dto.UpdateStatusRequest;
 import com.localdelivery.exception.InvalidStatusTransitionException;
-import com.localdelivery.exception.RequestAlreadyAcceptedException;
 import com.localdelivery.exception.ResourceNotFoundException;
-import com.localdelivery.exception.RequestNotOpenException;
-import com.localdelivery.exception.SelfAcceptanceException;
 import com.localdelivery.model.DeliveryRequest;
 import com.localdelivery.model.DeliveryStatus;
 import com.localdelivery.repository.DeliveryRequestRepository;
@@ -25,12 +21,14 @@ public class DeliveryRequestService {
     private final DeliveryRequestRepository requests;
     private final UserRepository users;
     private final EntityManager entityManager;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     public DeliveryRequestService(DeliveryRequestRepository requests, UserRepository users,
-                                  EntityManager entityManager) {
+                                  EntityManager entityManager, org.springframework.jdbc.core.JdbcTemplate jdbc) {
         this.requests = requests;
         this.users = users;
         this.entityManager = entityManager;
+        this.jdbc = jdbc;
     }
 
     @Transactional
@@ -77,26 +75,6 @@ public class DeliveryRequestService {
     }
 
     @Transactional
-    public DeliveryRequestResponse accept(Long id, AcceptRequestDto input, Long actorId) {
-        var request = load(id);
-        if (request.getHelper() != null || request.getStatus() == DeliveryStatus.ACCEPTED) {
-            throw new RequestAlreadyAcceptedException();
-        }
-        if (!request.getStatus().canTransitionTo(DeliveryStatus.ACCEPTED)) {
-            throw new RequestNotOpenException();
-        }
-        checkClaim(input.helperId(), actorId);
-        var helper = users.findById(actorId)
-                .orElseThrow(() -> new ResourceNotFoundException("Helper not found."));
-        if (request.getCustomer().getId().equals(helper.getId())) {
-            throw new SelfAcceptanceException();
-        }
-        request.setHelper(helper);
-        request.setStatus(DeliveryStatus.ACCEPTED);
-        return persist(request);
-    }
-
-    @Transactional
     public DeliveryRequestResponse updateStatus(Long id, UpdateStatusRequest input, Long actorId) {
         var request = load(id);
         var next = input.status();
@@ -109,13 +87,17 @@ public class DeliveryRequestService {
         // Acceptance must assign and validate a helper through the dedicated endpoint.
         if (next == DeliveryStatus.ACCEPTED) {
             throw new InvalidStatusTransitionException(
-                    "Use POST /api/requests/{id}/accept to assign a helper and accept this request.");
+                    "The customer must approve a pending helper request to accept this job.");
         }
         if (next != DeliveryStatus.CANCELLED && request.getHelper() == null) {
             throw new InvalidStatusTransitionException("Delivery request has no assigned helper.");
         }
         request.setStatus(next);
-        return persist(request);
+        var saved = persist(request);
+        if (next == DeliveryStatus.CANCELLED) {
+            jdbc.update("UPDATE job_applications SET status = 'CANCELLED', updated_at = clock_timestamp() WHERE request_id = ? AND status = 'PENDING'", id);
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)

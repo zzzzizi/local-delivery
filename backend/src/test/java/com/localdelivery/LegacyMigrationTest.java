@@ -45,7 +45,10 @@ class LegacyMigrationTest {
                     .isEqualTo(LocalDateTime.parse("2026-10-06T16:00:00"));
             assertThat(jdbc.queryForObject("SELECT updated_at FROM delivery_requests WHERE id=7", LocalDateTime.class))
                     .isEqualTo(LocalDateTime.parse("2026-10-05T17:00:00"));
-            assertThat(flyway.info().current().getVersion().toString()).isEqualTo("5");
+            assertThat(flyway.info().current().getVersion().toString()).isEqualTo("7");
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM job_applications", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_messages", Integer.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT version FROM delivery_requests WHERE id=7", Long.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT version_num FROM alembic_version", String.class)).isEqualTo("0001");
         }
@@ -61,6 +64,31 @@ class LegacyMigrationTest {
             assertThatThrownBy(() -> DatabaseMigrationConfiguration.migrate(Flyway.configure().dataSource(source).load()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("Unsupported legacy");
             assertThat(jdbc.queryForObject("SELECT version_num FROM alembic_version", String.class)).isEqualTo("9999");
+        }
+    }
+
+    @Test
+    void approvalMigrationPreservesExistingAssignmentsAndChatHistory() {
+        try (var database = new PostgresTestDatabase()) {
+            var source = new DriverManagerDataSource(database.url(), database.username, database.password);
+            var jdbc = new JdbcTemplate(source);
+            Flyway.configure().dataSource(source).target("6").load().migrate();
+            jdbc.execute("INSERT INTO users(id, name, email) VALUES (1, 'Customer', 'customer@example.com'), (2, 'Helper', 'helper@example.com')");
+            jdbc.execute("""
+                    INSERT INTO delivery_requests(id, customer_id, helper_id, category, title, description,
+                    pickup_address, delivery_address, helper_reward, deadline, status)
+                    VALUES (7, 1, 2, 'PACKAGE', 'Existing job', 'A parcel', 'Shop', 'Home', 50, now(), 'ACCEPTED')
+                    """);
+            jdbc.execute("INSERT INTO conversations(id, request_id, helper_id) VALUES (9, 7, 2)");
+            jdbc.execute("INSERT INTO chat_messages(conversation_id, sender_id, client_message_id, body) VALUES (9, 1, gen_random_uuid(), 'Existing conversation')");
+            var request = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = 7");
+            var message = jdbc.queryForMap("SELECT * FROM chat_messages");
+            Flyway.configure().dataSource(source).load().migrate();
+            assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = 7")).isEqualTo(request);
+            assertThat(jdbc.queryForMap("SELECT * FROM chat_messages")).isEqualTo(message);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Integer.class)).isEqualTo(2);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM conversations", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM job_applications", Integer.class)).isZero();
         }
     }
 }

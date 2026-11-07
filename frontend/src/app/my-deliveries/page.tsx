@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { JobApplications } from "../../components/job-applications";
 import { DeliveryBoard } from "../../components/delivery-board";
 import { ApiError } from "../../lib/api";
 import { fetchDeliveries } from "../../lib/helper-deliveries";
@@ -15,12 +16,15 @@ async function Deliveries() {
 	const user = await requireUser();
 	try {
 		return (
-			<DeliveryBoard
-				userId={user.id}
-				initialDeliveries={
-					await fetchDeliveries(user.id, await sessionHeaders())
-				}
-			/>
+			<>
+				<JobApplications userId={user.id} />
+				<DeliveryBoard
+					userId={user.id}
+					initialDeliveries={
+						await fetchDeliveries(user.id, await sessionHeaders())
+					}
+				/>
+			</>
 		);
 	} catch (error) {
 		return (

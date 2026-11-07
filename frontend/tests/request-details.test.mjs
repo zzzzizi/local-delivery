@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { ApiError } from "../src/lib/api.ts";
 import {
-	acceptJob as acceptJobAs,
 	fetchRequest,
 	isDeliveryRequest,
 	isRequestId,
@@ -77,10 +76,9 @@ test("detail IDs are positive canonical Java Long values", () => {
 		assert.equal(isRequestId(id), false);
 	}
 });
-test("invalid detail and acceptance IDs never issue HTTP requests", async (t) => {
+test("invalid detail IDs never issue HTTP requests", async (t) => {
 	const fetch = sequence(t, []);
 	await assert.rejects(fetchRequest("../new"), { status: 404 });
-	await assert.rejects(acceptJob("0"), { status: 404 });
 	assert.equal(fetch.mock.callCount(), 0);
 });
 test("complete details allow every status, category, optional budget and helper", () => {
@@ -150,103 +148,3 @@ test("missing detail preserves the backend 404", async (t) => {
 		message: "Delivery request not found.",
 	});
 });
-test("acceptance posts helper 2 once, then displays the refreshed GET result", async (t) => {
-	const latest = {
-		...accepted,
-		status: "PICKED_UP",
-		updatedAt: "2026-10-21T10:02:00Z",
-	};
-	const fetch = sequence(t, [accepted, latest]);
-	const result = await acceptJob("12");
-	assert.equal(result.kind, "success");
-	assert.equal(result.requiresRefresh, false);
-	assert.deepEqual(result.request, latest);
-	const calls = fetch.mock.calls;
-	assert.equal(calls.length, 2);
-	assert.equal(
-		calls[0].arguments[0],
-		"https://delivery.example/api/requests/12/accept",
-	);
-	assert.equal(calls[0].arguments[1].method, "POST");
-	assert.deepEqual(JSON.parse(calls[0].arguments[1].body), {});
-	assert.equal(
-		calls[1].arguments[0],
-		"https://delivery.example/api/requests/12",
-	);
-	assert.equal(calls[1].arguments[1].method, undefined);
-});
-test("successful acceptance survives a failed refresh using the saved response", async (t) => {
-	sequence(t, [accepted, unavailable]);
-	const result = await acceptJob("12");
-	assert.equal(result.kind, "success");
-	assert.deepEqual(result.request, accepted);
-	assert.match(result.message, /couldn’t reload/);
-});
-test("already-accepted conflict preserves the error and refreshes the winning helper", async (t) => {
-	const winner = { ...accepted, helperId: 3 };
-	sequence(t, [conflict, winner]);
-	const result = await acceptJob("12");
-	assert.equal(result.kind, "error");
-	assert.match(result.message, /already been accepted/);
-	assert.deepEqual(result.request, winner);
-	assert.equal(result.requiresRefresh, false);
-});
-for (const response of [open, unavailable]) {
-	test(`conflict blocks repeated acceptance when refresh ${typeof response === "function" ? "fails" : "still says OPEN"}`, async (t) => {
-		const fetch = sequence(t, [conflict, response]);
-		const result = await acceptJob("12");
-		assert.equal(result.kind, "error");
-		assert.equal(result.requiresRefresh, true);
-		assert.equal(fetch.mock.callCount(), 2);
-	});
-}
-for (const failure of [
-	new TypeError("Connection lost"),
-	new DOMException("Timed out", "TimeoutError"),
-	unavailable,
-]) {
-	test(`uncertain POST (${typeof failure === "function" ? "503" : failure.name}) reconciles saved acceptance without a second POST`, async (t) => {
-		const fetch = sequence(t, [failure, accepted]);
-		const result = await acceptJob("12");
-		assert.equal(result.kind, "success");
-		assert.deepEqual(result.request, accepted);
-		assert.match(result.message, /assigned helper/);
-		assert.equal(fetch.mock.callCount(), 2);
-	});
-}
-for (const response of [
-	open,
-	{ ...accepted, helperId: 3 },
-	{ ...accepted, status: "CANCELLED" },
-	unavailable,
-]) {
-	test(`uncertain acceptance requires manual refresh for ${typeof response === "function" ? "unavailable details" : `${response.status}, helper ${response.helperId}`}`, async (t) => {
-		sequence(t, [new TypeError("Connection lost"), response]);
-		const result = await acceptJob("12");
-		assert.equal(result.kind, "error");
-		assert.equal(result.requiresRefresh, true);
-		assert.match(result.message, /couldn’t confirm acceptance/);
-	});
-}
-for (const status of [400, 404, 422]) {
-	test(`known business error ${status} is shown without an acceptance retry`, async (t) => {
-		const fetch = sequence(t, [
-			() =>
-				Response.json({ message: "Business validation failed." }, { status }),
-		]);
-		await assert.rejects(
-			acceptJob("12"),
-			(error) => error instanceof ApiError && error.status === status,
-		);
-		assert.equal(fetch.mock.callCount(), 1);
-	});
-}
-test("invalid acceptance response is reconciled instead of claiming success", async (t) => {
-	sequence(t, [{ ...accepted, id: 13 }, open]);
-	const result = await acceptJob("12");
-	assert.equal(result.kind, "error");
-	assert.equal(result.requiresRefresh, true);
-	assert.deepEqual(result.request, open);
-});
-
-function acceptJob(id) { return acceptJobAs(id, 2); }

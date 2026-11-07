@@ -9,6 +9,7 @@ const links = [
 	{ href: "/jobs", label: "Available Jobs" },
 	{ href: "/my-requests", label: "My Requests" },
 	{ href: "/my-deliveries", label: "My Deliveries" },
+	{ href: "/messages", label: "Messages" },
 ];
 
 export function Navigation() {
@@ -20,7 +21,12 @@ export function Navigation() {
 					<li key={href}>
 						<Link
 							href={href}
-							aria-current={pathname === href ? "page" : undefined}
+							aria-current={
+								pathname === href ||
+								(href === "/messages" && pathname.startsWith("/messages/"))
+									? "page"
+									: undefined
+							}
 						>
 							{label}
 						</Link>

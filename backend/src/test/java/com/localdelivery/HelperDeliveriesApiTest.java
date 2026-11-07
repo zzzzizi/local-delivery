@@ -68,8 +68,12 @@ class HelperDeliveriesApiTest {
     }
 
     private JsonNode accept(long id, long helperId) throws Exception {
-        return json.readTree(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user(Long.toString(helperId)))
-                .contentType("application/json").content("{\"helperId\":" + helperId + "}"))
+        var application = json.readTree(mvc.perform(post("/api/requests/" + id + "/applications").with(csrf()).with(user(Long.toString(helperId)))
+                .contentType("application/json").content("{}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        long customerId = jdbc.queryForObject("SELECT customer_id FROM delivery_requests WHERE id = ?", Long.class, id);
+        return json.readTree(mvc.perform(post("/api/requests/" + id + "/applications/" + application.get("id").asLong() + "/approve")
+                .with(csrf()).with(user(Long.toString(customerId))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
     }
 

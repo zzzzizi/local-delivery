@@ -77,9 +77,12 @@ class SecurityApiTest {
                 .andReturn().getResponse().getContentAsString()).get("id").asLong();
     }
     private void accept(long id) throws Exception {
-        mvc.perform(post("/api/requests/" + id + "/accept").session(helper).with(csrf())
+        var application = json.readTree(mvc.perform(post("/api/requests/" + id + "/applications").session(helper).with(csrf())
                 .contentType("application/json").content("{}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.helperId").value(helperId));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.helperId").value(helperId))
+                .andReturn().getResponse().getContentAsString());
+        mvc.perform(post("/api/requests/" + id + "/applications/" + application.get("id").asLong() + "/approve").session(customer).with(csrf()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACCEPTED"));
     }
 
     @ParameterizedTest

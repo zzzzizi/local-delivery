@@ -144,7 +144,7 @@ class DeliveryWorkflowIntegrationTest {
 
         current = accept(id, 2, 200);
         before = jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id);
-        assertConflict(accept(id, 2, 409));
+        assertThat(accept(id, 2, 200)).isEqualTo(current);
         assertConflict(update(id, "DELIVERED", 409));
         assertThat(jdbc.queryForMap("SELECT * FROM delivery_requests WHERE id = ?", id)).isEqualTo(before);
         assertAllViews(current, waiting, otherAssigned);
@@ -212,8 +212,10 @@ class DeliveryWorkflowIntegrationTest {
     }
 
     private JsonNode accept(long id, long helperId, int expectedStatus) throws Exception {
-        return request("POST", "/api/requests/" + id + "/accept",
+        var application = request("POST", "/api/requests/" + id + "/accept",
                 json.createObjectNode().put("helperId", helperId), expectedStatus);
+        if (expectedStatus != 200) return application;
+        return request("POST", "/api/requests/" + id + "/applications/" + application.get("id").asLong() + "/approve", json.createObjectNode(), 200);
     }
 
     private JsonNode update(long id, String next, int expectedStatus) throws Exception {
@@ -227,6 +229,7 @@ class DeliveryWorkflowIntegrationTest {
         long actor = path.startsWith("/api/users/2/") ? 2 : 1;
         if (method.equals("POST") && path.equals("/api/requests")) actor = body.get("customerId").asLong();
         else if (path.endsWith("/accept")) actor = body.get("helperId").asLong();
+        else if (path.endsWith("/approve")) actor = jdbc.queryForObject("SELECT customer_id FROM delivery_requests WHERE id = ?", Long.class, Long.valueOf(path.split("/")[3]));
         else if (method.equals("PATCH")) actor = body.get("status").asText().equals("CANCELLED") ? 1 : 2;
         var client = CLIENTS.get(actor);
         if (client == null) {

@@ -711,3 +711,52 @@ fieldset:disabled .button {
 	display: grid;
 	gap: 1.2rem;
 }
+
+/* Request conversations */
+.chat-entry { margin: 28px 0; padding: 24px; border: 1px solid #cbd6cd; border-radius: 12px; background: #fffefa; }
+.chat-entry h2 { font-size: 22px; }
+.chat-entry p { line-height: 1.6; }
+.conversation-list, .message-list { list-style: none; padding: 0; margin: 0; }
+.conversation-list { display: grid; gap: 16px; }
+.conversation-card { display: flex; justify-content: space-between; gap: 24px; padding: 24px; border: 1px solid #cbd6cd; border-radius: 12px; background: #fffefa; text-decoration: none; overflow-wrap: anywhere; }
+.conversation-card:hover { border-color: #173d32; background: #f1f5eb; }
+.conversation-card h2 { font-size: 23px; }
+.conversation-card p { margin: 8px 0; }
+.conversation-meta { flex-shrink: 0; text-align: right; font-size: 13px; }
+.chat-refresh { margin: 16px 0 24px 20px; }
+.chat-room { max-width: 860px; padding: clamp(16px, 4vw, 32px); border: 1px solid #cbd6cd; border-radius: 12px; background: #fffefa; }
+.chat-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; overflow-wrap: anywhere; }
+.chat-heading h2 { font-size: 26px; }
+.chat-heading p { margin: 8px 0; }
+.chat-hint { color: #52645b; font-size: 13px; line-height: 1.6; }
+.chat-history { height: min(50vh, 480px); min-height: 220px; overflow-y: auto; margin: 20px 0; padding: 12px; border-block: 1px solid #d6dfd5; overscroll-behavior: contain; }
+.message-list { display: flex; flex-direction: column; gap: 18px; }
+.message { align-self: flex-start; max-width: 84%; padding: 14px 18px; background: #eef0e9; border-radius: 14px 14px 14px 3px; overflow-wrap: anywhere; }
+.message.own { align-self: flex-end; background: #deeddf; border-radius: 14px 14px 3px 14px; }
+.message-author { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+.message-body { white-space: pre-wrap; line-height: 1.6; margin: 0 0 8px; }
+.message time { font-size: 11px; color: #52645b; }
+.chat-composer label { display: block; margin-bottom: 10px; font-weight: 600; }
+.chat-composer textarea { width: 100%; resize: vertical; padding: 14px; border: 1px solid #a9b9ad; border-radius: 8px; background: white; font: inherit; color: inherit; }
+.chat-composer .request-actions { justify-content: space-between; margin-top: 12px; font-size: 13px; }
+.chat-closed, .chat-empty { line-height: 1.7; padding: 20px; background: #f1f3ed; border-radius: 8px; }
+@media (max-width: 640px) {
+ .conversation-card { flex-direction: column; gap: 12px; padding: 20px; }
+ .conversation-meta { text-align: left; }
+ .chat-heading { flex-direction: column; }
+ .chat-refresh { display: block; margin-left: 0; }
+ .message { max-width: 94%; }
+}
+
+.application-panel { margin-block: 32px; padding: 24px; border: 1px solid #cbd6cd; border-radius: 12px; background: #fffefa; }
+.application-panel h2 { font-size: 24px; margin-bottom: 12px; }
+.application-panel p { line-height: 1.6; }
+.application-panel .jobs-toolbar { align-items: flex-start; }
+.application-panel .jobs-toolbar button { flex-shrink: 0; }
+.application-list { list-style: none; padding: 0; display: grid; gap: 16px; }
+.application-card { padding: 20px; border: 1px solid #d6dfd5; border-radius: 10px; overflow-wrap: anywhere; }
+.application-card h3 { margin-top: 0; }
+.application-status { font-weight: 600; }
+.application-status[data-status="PENDING"] { color: #78520c; }
+.application-status[data-status="DECLINED"] { color: #893c30; }
+@media (max-width: 640px) { .application-panel { padding: 18px; } .application-panel .jobs-toolbar { flex-direction: column; } }

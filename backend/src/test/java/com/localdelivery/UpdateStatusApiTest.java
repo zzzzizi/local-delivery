@@ -64,6 +64,7 @@ class UpdateStatusApiTest {
     @Autowired DeliveryRequestRepository requests;
     @Autowired DemoUserService demoUsers;
     @Autowired DeliveryRequestService service;
+    @Autowired com.localdelivery.service.JobApplicationService applications;
     @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
@@ -146,7 +147,7 @@ class UpdateStatusApiTest {
                     .andExpect(jsonPath("$.timestamp").isString());
             if (current == DeliveryStatus.OPEN && next == DeliveryStatus.ACCEPTED) {
                 result.andExpect(jsonPath("$.message").value(
-                        "Use POST /api/requests/{id}/accept to assign a helper and accept this request."));
+                        "The customer must approve a pending helper request to accept this job."));
             } else {
                 result.andExpect(jsonPath("$.message").value(
                         "Cannot change delivery status from " + current + " to " + next + "."));
@@ -160,8 +161,10 @@ class UpdateStatusApiTest {
     @EnumSource(RequestCategory.class)
     void progressesFromCreationThroughAcceptanceToDelivered(RequestCategory category) throws Exception {
         long id = create(category).get("id").asLong();
-        JsonNode previous = bodyOf(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2"))
+        JsonNode application = bodyOf(mvc.perform(post("/api/requests/" + id + "/accept").with(csrf()).with(user("2"))
                 .contentType("application/json").content("{\"helperId\":2}")).andExpect(status().isOk()));
+        JsonNode previous = bodyOf(mvc.perform(post("/api/requests/" + id + "/applications/" + application.get("id").asLong() + "/approve")
+                .with(csrf()).with(user("1"))).andExpect(status().isOk()));
         long version = 1;
         for (var next : List.of(DeliveryStatus.PICKED_UP, DeliveryStatus.DELIVERING, DeliveryStatus.DELIVERED)) {
             JsonNode updated = bodyOf(update(id, next).andExpect(status().isOk()));
@@ -238,6 +241,7 @@ class UpdateStatusApiTest {
     @Timeout(30)
     void cancellationRacingWithAcceptanceOrPickupCommitsOnlyOneUpdate(DeliveryStatus initialStatus) throws Exception {
         long id = createInState(initialStatus);
+        long applicationId = initialStatus == DeliveryStatus.OPEN ? applications.apply(id, 2).id() : 0;
         var forward = initialStatus == DeliveryStatus.OPEN ? DeliveryStatus.ACCEPTED : DeliveryStatus.PICKED_UP;
         var bothRead = new CyclicBarrier(2);
         var executor = Executors.newFixedThreadPool(2);
@@ -250,7 +254,7 @@ class UpdateStatusApiTest {
                         assertThat(initial.getVersion()).isZero();
                         assertThat(initial.getStatus()).isEqualTo(initialStatus);
                         await(bothRead);
-                        return next == DeliveryStatus.ACCEPTED ? service.accept(id, new AcceptRequestDto(2L), 2L)
+                        return next == DeliveryStatus.ACCEPTED ? applications.approve(id, applicationId, 1)
                                 : service.updateStatus(id, new UpdateStatusRequest(next), next == DeliveryStatus.CANCELLED ? 1L : 2L);
                     });
                     return new UpdateAttempt(response, null);
@@ -263,7 +267,7 @@ class UpdateStatusApiTest {
             var losers = results.stream().filter(result -> result.failure() != null).toList();
             assertThat(winners).hasSize(1);
             assertThat(losers).hasSize(1);
-            assertThat(losers.getFirst().failure()).isInstanceOf(OptimisticLockingFailureException.class);
+            assertThat(losers.getFirst().failure()).isInstanceOfAny(OptimisticLockingFailureException.class, com.localdelivery.exception.RequestNotOpenException.class);
             assertThat(detail(id)).isEqualTo(json.readTree(json.writeValueAsString(winners.getFirst().response())));
             var stored = requests.findById(id).orElseThrow();
             assertThat(stored.getStatus()).isEqualTo(winners.getFirst().response().status());
